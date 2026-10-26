@@ -1,14 +1,23 @@
 import express, { Request, Response } from "express";
 import dotenv from "dotenv";
+import swaggerUi from "swagger-ui-express";
+import swaggerOptions from "./swagger";
 import { PrismaClient } from "@prisma/client";
 import { authenticateJWT, authorizeRoles, errorHandler } from "./middleware";
 import { validate, classifyTicket } from "./middleware/validate.middleware";
 import { withTimeout } from "./services/ai/client";
+import { hf } from "./services/ai/client";
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerOptions));
+
+// === HEALTH CHECK ===
+app.get("/api/health", (req: Request, res: Response) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
 
 const prisma = new PrismaClient();
 
