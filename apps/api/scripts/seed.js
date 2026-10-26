@@ -5,7 +5,10 @@ import fs from "fs";
 const prisma = new PrismaClient();
 
 const authorsData = JSON.parse(
-  fs.readFileSync(path.resolve("../bookleaf_sample_data.json"), "utf-8")
+  fs.readFileSync(
+    path.resolve(__dirname, "../../../bookleaf_sample_data.json"),
+    "utf-8"
+  )
 ).authors;
 
 const CATEGORIES = [

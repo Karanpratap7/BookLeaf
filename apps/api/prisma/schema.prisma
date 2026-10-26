@@ -7,95 +7,109 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id            String    @id @default(uuid())
-  email         String    @unique
-  passwordHash  String
-  name          String?
-  role          Role
-  authorId      String?   @map("author_id")
-  phone         String?
-  city          String?
-  joinedDate    DateTime  @defaultNow @map("joined_date")
-  books         Book[]
-  tickets       Ticket[]
-  createdAt     DateTime  @defaultNow
-  updatedAt     DateTime  @updatedAt
-}
-
 enum Role {
   AUTHOR
   ADMIN
 }
 
+model User {
+  id           String         @id @default(uuid())
+  email        String         @unique
+  passwordHash String         @map("password_hash")
+  name         String?
+  role         Role
+  authorId     String?        @map("author_id")
+  phone        String?
+  city         String?
+  joinedDate   DateTime?      @map("joined_date")
+  books        Book[]
+  tickets      Ticket[]       @relation("AuthorTickets")
+  assignedTickets Ticket[]    @relation("AdminAssignment")
+  internalNotes InternalNote[]
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
 model Book {
-  id            String    @id @default(uuid())
-  title         String
-  isbn          String?
-  genre         String?
-  publicationDate DateTime?
-  status        String?
-  mrp           Float?
-  authorRoyaltyPerCopy Float?
-  totalCopiesSold Integer
-  totalRoyaltyEarned Integer
-  royaltyPaid   Integer
-  royaltyPending Integer
-  lastRoyaltyPayoutDate DateTime?
-  printPartner  String?
-  availableOn     Json?
-  author        User?     @relation(fields: [authorId], references: [id])
-  authorId      String?   @map("author_id")
-  tickets       Ticket[]
-  createdAt     DateTime  @defaultNow
-  updatedAt     DateTime  @updatedAt
+  id                     String    @id @default(uuid())
+  title                  String
+  isbn                   String?
+  genre                  String?
+  publicationDate        DateTime? @map("publication_date")
+  status                 String?
+  mrp                    Float?
+  authorRoyaltyPerCopy   Float?    @map("author_royalty_per_copy")
+  totalCopiesSold        Int       @default(0) @map("total_copies_sold")
+  totalRoyaltyEarned     Int       @default(0) @map("total_royalty_earned")
+  royaltyPaid            Int       @default(0) @map("royalty_paid")
+  royaltyPending         Int       @default(0) @map("royalty_pending")
+  lastRoyaltyPayoutDate  DateTime? @map("last_royalty_payout_date")
+  printPartner           String?   @map("print_partner")
+  availableOn            Json?     @map("available_on")
+  author                 User?     @relation(fields: [authorId], references: [id])
+  authorId               String?   @map("author_id")
+  tickets                Ticket[]
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  @@map("books")
 }
 
 model Ticket {
-  id            String    @id @default(uuid())
-  author        User      @relation(fields: [authorId], references: [id])
-  authorId      String
-  book          Book?     @relation(fields: [bookId], references: [id])
-  bookId        String?
-  subject       String
-  description   String
-  status        String
-  category      String
-  priority      String
-  categoryOverride String?   @map("category_override")
-  priorityOverride String?   @map("priority_override")
-  assignedAdmin   User?     @relation("AdminAssignment", fields: [assignedAdminId], references: [id])
-  assignedAdminId String?
-  createdAt     DateTime  @defaultNow
-  updatedAt     DateTime  @updatedAt
-  messages      TicketMessage[]
-  internalNotes   InternalNote[]
+  id               String          @id @default(uuid())
+  author           User            @relation("AuthorTickets", fields: [authorId], references: [id])
+  authorId         String          @map("author_id")
+  book             Book?           @relation(fields: [bookId], references: [id])
+  bookId           String?         @map("book_id")
+  subject          String
+  description      String
+  status           String          @default("Open")
+  category         String          @default("General Inquiry")
+  priority         String          @default("Medium")
+  categoryOverride String?         @map("category_override")
+  priorityOverride String?         @map("priority_override")
+  assignedAdmin    User?           @relation("AdminAssignment", fields: [assignedAdminId], references: [id])
+  assignedAdminId  String?         @map("assigned_admin_id")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+  messages         TicketMessage[]
+  internalNotes    InternalNote[]
+
+  @@map("tickets")
 }
 
 model TicketMessage {
-  id        String @id @default(uuid())
-  ticket    Ticket @relation(fields: [ticketId], references: [id])
-  ticketId  String
-  senderRole Role
-  body      String
-  createdAt DateTime @defaultNow
+  id         String   @id @default(uuid())
+  ticket     Ticket   @relation(fields: [ticketId], references: [id])
+  ticketId   String   @map("ticket_id")
+  senderRole Role     @map("sender_role")
+  body       String
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("ticket_messages")
 }
 
 model InternalNote {
-  id        String @id @default(uuid())
-  ticket    Ticket @relation(fields: [ticketId], references: [id])
-  ticketId  String
-  admin     User   @relation(fields: [adminId], references: [id])
-  adminId   String
+  id        String   @id @default(uuid())
+  ticket    Ticket   @relation(fields: [ticketId], references: [id])
+  ticketId  String   @map("ticket_id")
+  admin     User     @relation(fields: [adminId], references: [id])
+  adminId   String   @map("admin_id")
   body      String
-  createdAt DateTime @defaultNow
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("internal_notes")
 }
 
 model KbChunk {
-  id            String    @id @default(uuid())
-  category      String?   @map("category")
-  title         String
-  content       String
-  embedding     Json?
-  createdAt     DateTime  @defaultNow
+  id        String   @id @default(uuid())
+  category  String?
+  title     String
+  content   String
+  embedding Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("kb_chunks")
 }
