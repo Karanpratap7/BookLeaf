@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+/pnpm-lockfile
+/yarn-debounce-lockfile
+
+# Environment variables
+.env
+
+# Production builds
+/apps/web/dist/
+/apps/api/.next/
+
+# Prisma
+/.prisma/
+/apps/api/prisma/client/
+
+# Dotenv
+/.env*
+
+# IDE
+/.vscode/
+/.user/
+
+# Logs
+*.log
