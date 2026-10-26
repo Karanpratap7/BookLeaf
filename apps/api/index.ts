@@ -19,17 +19,23 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
   if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
   // Simple password check - in prod use bcrypt
-  if (password !== "Author@123" && !(user.email === "admin@bookleaf.com" && password === "Admin@123")) {
+  const demoPassword = "Author@123";
+  const isAdmin = user.email === "admin@bookleaf.com" && password === "Admin@123";
+  const isAuthor = password === demoPassword;
+
+  if (!isAuthor && !isAdmin) {
     return res.status(401).json({ error: "Invalid credentials" });
   }
 
+  const role = user.email === "admin@bookleaf.com" ? "ADMIN" : "AUTHOR";
+
   const token = jwt.sign(
-    { id: user.id, email: user.email, role: user.role },
+    { id: user.id, email: user.email, role },
     process.env.JWT_SECRET!,
     { expiresIn: "24h" }
   );
 
-  res.json({ token, role: user.role });
+  res.json({ token, role });
 });
 
 app.get("/api/auth/me", authenticateJWT, async (req: Request, res: Response) => {
@@ -52,7 +58,7 @@ app.get(
   }
 );
 
-// === TICKETS (Author) ===
+// === SUBMIT SUPPORT QUERY ===
 app.post(
   "/api/tickets",
   authenticateJWT,
@@ -81,13 +87,29 @@ app.post(
     });
 
     // Enqueue async AI classify+priority (Phase 2) - non-blocking
-    // TODO: trigger AI job
+    // TODO: trigger AI job via queue
 
     res.status(201).json(ticket);
   }
 );
 
-// === TICKETS (Author - detail + messages) ===
+// === MY TICKETS ===
+app.get(
+  "/api/tickets/mine",
+  authenticateJWT,
+  authorizeRoles("AUTHOR"),
+  async (req: Request, res: Response) => {
+    const authorId = req.user!.id;
+    const tickets = await prisma.ticket.findMany({
+      where: { authorId },
+      include: { messages: true },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json(tickets);
+  }
+);
+
+// === TICKET DETAIL ===
 app.get(
   "/api/tickets/:id",
   authenticateJWT,
@@ -106,7 +128,7 @@ app.get(
   }
 );
 
-// === SSE STREAM ===
+// === SSE STREAM for My Tickets ===
 app.get(
   "/api/tickets/mine/stream",
   authenticateJWT,
@@ -116,8 +138,8 @@ app.get(
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
 
-    // Keep connection alive; in prod use proper SSE hub
     res.write("data: {\"status\":\"connected\"}\n\n");
+    // In production, push events via Redis/SSE hub when ticket updates occur
   }
 );
 
