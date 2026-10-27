@@ -98,7 +98,7 @@ onMounted(load)
         <tbody>
           <tr v-for="t in tickets" :key="t.id">
             <td><span class="badge" :class="displayPriority(t)">{{ displayPriority(t) }}</span></td>
-            <td><span class="badge" :class="t.status">{{ t.status }}</span></td>
+            <td><span class="badge" :class="t.status" data-status="t.status">{{ t.status }}</span></td>
             <td>
               <RouterLink :to="`/admin/tickets/${t.id}`"><strong>{{ t.subject }}</strong></RouterLink>
             </td>

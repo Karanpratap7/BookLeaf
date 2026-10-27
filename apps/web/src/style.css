@@ -108,7 +108,7 @@ label {
 .badge.Medium { background: #ffedd5; color: var(--warn); }
 .badge.Low { background: #dcfce7; color: var(--ok); }
 .badge.Open { background: #e0f2fe; color: #075985; }
-.badge.In\ Progress, .badge["In Progress"] { background: #fef3c7; color: #92400e; }
+.badge[data-status="In Progress"] { background: #fef3c7; color: #92400e; }
 .badge.Resolved, .badge.Closed { background: #dcfce7; color: var(--ok); }
 .muted { color: var(--muted); }
 .error {

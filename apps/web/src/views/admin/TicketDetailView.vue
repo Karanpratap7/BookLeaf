@@ -133,7 +133,7 @@ async function addNote() {
         </div>
         <div style="display: flex; gap: 0.5rem; align-items: center">
           <span class="badge" :class="displayPriority">{{ displayPriority }}</span>
-          <span class="badge" :class="ticket.status">{{ ticket.status }}</span>
+          <span class="badge" :class="ticket.status" data-status="ticket.status">{{ ticket.status }}</span>
         </div>
       </div>
 

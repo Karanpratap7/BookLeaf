@@ -60,7 +60,7 @@ onUnmounted(() => clearInterval(timer))
             · {{ new Date(ticket.createdAt).toLocaleString() }}
           </p>
         </div>
-        <span class="badge" :class="ticket.status">{{ ticket.status }}</span>
+        <span class="badge" :class="ticket.status" data-status="ticket.status">{{ ticket.status }}</span>
       </div>
       <div class="card" style="margin-top: 1rem">
         <h3 style="margin-top: 0">Conversation</h3>

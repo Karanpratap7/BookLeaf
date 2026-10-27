@@ -1,0 +1,14 @@
+{
+  "name": "bookleaf",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "setup": "npm install && cd apps/api && npx prisma generate && npx prisma migrate reset --force && npx prisma migrate dev --name init && npx tsx scripts/seed.js",
+    "db:generate": "cd apps/api && npx prisma generate",
+    "db:migrate": "cd apps/api && npx prisma migrate dev --name init",
+    "db:seed": "cd apps/api && npx tsx scripts/seed.js",
+    "dev:api": "cd apps/api && npx tsx index.ts",
+    "dev:web": "cd apps/web && npm run dev",
+    "dev": "bash /tmp/run_bookleaf.sh"
+  }
+}

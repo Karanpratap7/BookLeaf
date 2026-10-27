@@ -52,7 +52,7 @@ onUnmounted(() => clearInterval(timer))
               · {{ t.priority }}
             </div>
           </div>
-          <span class="badge" :class="t.status">{{ t.status }}</span>
+          <span class="badge" :class="t.status" data-status="t.status">{{ t.status }}</span>
         </div>
       </div>
     </div>
