@@ -11,9 +11,8 @@ function headers() {
 // Generic fetch function that supports both Vercel and Neon URLs
 async function request(path, options = {}) {
   // Determine which base URL to use based on the path
+  // Auth routes go to Vercel (CORS works there), Prisma routes go to Neon
   const neonPaths = [
-    '/api/auth/login',
-    '/api/authors/me/books', 
     '/api/tickets/mine',
     '/api/admin/tickets',
     '/api/admin/tickets/[id]',
@@ -22,11 +21,12 @@ async function request(path, options = {}) {
     '/api/admin/tickets/[id]/responses',
     '/api/admin/stats',
     '/api/tickets/[id]',
-    '/api/tickets/mine',
     '/api/tickets/[id]/messages',
+    '/api/authors/me/books',
   ]
   
-  const useNeon = neonPaths.includes(path)
+  // Keep auth/login on Vercel for proper CORS support
+  const useNeon = !neonPaths.includes(path) && neonPaths.some(p => path.includes('/')) && !path.includes('/login')
   const baseURL = useNeon ? NEON_FUNCTION_URL : API
   
   const res = await fetch(`${baseURL}${path}`, {
@@ -51,7 +51,7 @@ async function request(path, options = {}) {
 
 // API endpoints - mix of Vercel and Neon routes
 export const api = {
-  // Vercel routes (non-Prisma, fast cold starts)
+  // Vercel routes (have working CORS - login, books, health)
   login: (email, password) =>
     request('/api/auth/login', {
       method: 'POST',
@@ -60,7 +60,7 @@ export const api = {
   me: () => request('/api/auth/me'),
   myBooks: () => request('/api/books'),
   
-  // Neon Functions routes (Prisma-dependent, no cold starts)
+  // Neon Functions routes (Prisma-dependent)
   myTickets: () => request('/api/tickets/mine'),
   ticket: (id) => request(`/api/tickets/${id}`),
   createTicket: (payload) =>
