@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { api } from '../../api'
 
 const tickets = ref([])
@@ -21,7 +21,6 @@ const categories = [
 ]
 
 async function load() {
-  loading.value = true
   try {
     tickets.value = await api.adminTickets({ ...filters })
     error.value = ''
@@ -39,7 +38,22 @@ function displayPriority(t) {
   return t.priorityOverride || t.priority
 }
 
-onMounted(load)
+const DAY = 86_400_000
+const unresolved = (t) => t.status === 'Open' || t.status === 'In Progress'
+const isUrgent = (t) => unresolved(t) && ['Critical', 'High'].includes(displayPriority(t))
+const isAging = (t) => unresolved(t) && Date.now() - new Date(t.createdAt) > 2 * DAY
+
+function age(t) {
+  const h = Math.floor((Date.now() - new Date(t.createdAt)) / 3_600_000)
+  return h < 24 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`
+}
+
+let timer
+onMounted(() => {
+  load()
+  timer = setInterval(() => !document.hidden && load(), 10000)
+})
+onUnmounted(() => clearInterval(timer))
 </script>
 
 <template>
@@ -92,19 +106,27 @@ onMounted(load)
             <th>Subject</th>
             <th>Author</th>
             <th>Category</th>
-            <th>Created</th>
+            <th>Assignee</th>
+            <th>Age</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="t in tickets" :key="t.id">
-            <td><span class="badge" :class="displayPriority(t)">{{ displayPriority(t) }}</span></td>
-            <td><span class="badge" :class="t.status" data-status="t.status">{{ t.status }}</span></td>
+          <tr v-for="t in tickets" :key="t.id" :class="{ urgent: isUrgent(t), aging: isAging(t) }">
             <td>
-              <RouterLink :to="`/admin/tickets/${t.id}`"><strong>{{ t.subject }}</strong></RouterLink>
+              <span class="badge" :class="displayPriority(t)">{{ displayPriority(t) }}</span>
+            </td>
+            <td>
+              <span class="badge" :class="t.status" :data-status="t.status">{{ t.status }}</span>
+            </td>
+            <td>
+              <RouterLink :to="`/admin/tickets/${t.id}`"
+                ><strong>{{ t.subject }}</strong></RouterLink
+              >
             </td>
             <td>{{ t.author?.name }}</td>
             <td>{{ displayCategory(t) }}</td>
-            <td>{{ new Date(t.createdAt).toLocaleString() }}</td>
+            <td>{{ t.assignedAdmin?.name || '—' }}</td>
+            <td :title="new Date(t.createdAt).toLocaleString()">{{ age(t) }}</td>
           </tr>
         </tbody>
       </table>

@@ -41,7 +41,7 @@ async function sendReply() {
 
 onMounted(() => {
   load()
-  timer = setInterval(load, 4000)
+  timer = setInterval(() => !document.hidden && load(), 4000)
 })
 onUnmounted(() => clearInterval(timer))
 </script>
@@ -52,7 +52,15 @@ onUnmounted(() => clearInterval(timer))
     <div v-if="error" class="error" style="margin-top: 1rem">{{ error }}</div>
     <div v-else-if="!ticket" class="empty">Loading…</div>
     <template v-else>
-      <div style="display: flex; justify-content: space-between; gap: 1rem; align-items: start; margin-top: 0.75rem">
+      <div
+        style="
+          display: flex;
+          justify-content: space-between;
+          gap: 1rem;
+          align-items: start;
+          margin-top: 0.75rem;
+        "
+      >
         <div>
           <h2 style="margin: 0">{{ ticket.subject }}</h2>
           <p class="muted">
@@ -60,7 +68,9 @@ onUnmounted(() => clearInterval(timer))
             · {{ new Date(ticket.createdAt).toLocaleString() }}
           </p>
         </div>
-        <span class="badge" :class="ticket.status" data-status="ticket.status">{{ ticket.status }}</span>
+        <span class="badge" :class="ticket.status" :data-status="ticket.status">{{
+          ticket.status
+        }}</span>
       </div>
       <div class="card" style="margin-top: 1rem">
         <h3 style="margin-top: 0">Conversation</h3>
@@ -71,7 +81,9 @@ onUnmounted(() => clearInterval(timer))
         >
           <div style="display: flex; justify-content: space-between; gap: 1rem">
             <strong>{{ m.senderRole === 'ADMIN' ? 'BookLeaf Support' : 'You' }}</strong>
-            <span class="muted" style="font-size: 0.8rem">{{ new Date(m.createdAt).toLocaleString() }}</span>
+            <span class="muted" style="font-size: 0.8rem">{{
+              new Date(m.createdAt).toLocaleString()
+            }}</span>
           </div>
           <p style="margin: 0.4rem 0 0; white-space: pre-wrap">{{ m.body }}</p>
         </div>
@@ -84,11 +96,7 @@ onUnmounted(() => clearInterval(timer))
           Add a follow-up for the BookLeaf team on this ticket.
         </p>
         <div class="field">
-          <textarea
-            v-model="reply"
-            rows="4"
-            placeholder="Type your follow-up message…"
-          />
+          <textarea v-model="reply" rows="4" placeholder="Type your follow-up message…" />
         </div>
         <button type="button" :disabled="sending || !reply.trim()" @click="sendReply">
           {{ sending ? 'Sending…' : 'Send message' }}

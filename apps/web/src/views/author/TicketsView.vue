@@ -20,7 +20,7 @@ async function load() {
 
 onMounted(() => {
   load()
-  timer = setInterval(load, 5000)
+  timer = setInterval(() => !document.hidden && load(), 5000)
 })
 onUnmounted(() => clearInterval(timer))
 </script>
@@ -36,7 +36,9 @@ onUnmounted(() => clearInterval(timer))
     </div>
     <div v-if="error" class="error">{{ error }}</div>
     <div v-else-if="loading" class="empty">Loading tickets…</div>
-    <div v-else-if="!tickets.length" class="empty">No tickets yet. Raise a support query to get started.</div>
+    <div v-else-if="!tickets.length" class="empty">
+      No tickets yet. Raise a support query to get started.
+    </div>
     <div v-else class="card" style="padding: 0">
       <div
         v-for="t in tickets"
@@ -45,14 +47,15 @@ onUnmounted(() => clearInterval(timer))
       >
         <div style="display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap">
           <div>
-            <RouterLink :to="`/author/tickets/${t.id}`"><strong>{{ t.subject }}</strong></RouterLink>
+            <RouterLink :to="`/author/tickets/${t.id}`"
+              ><strong>{{ t.subject }}</strong></RouterLink
+            >
             <div class="muted" style="font-size: 0.85rem">
               {{ new Date(t.createdAt).toLocaleString() }}
-              · {{ t.category }}
-              · {{ t.priority }}
+              · {{ t.category }} · {{ t.priority }}
             </div>
           </div>
-          <span class="badge" :class="t.status" data-status="t.status">{{ t.status }}</span>
+          <span class="badge" :class="t.status" :data-status="t.status">{{ t.status }}</span>
         </div>
       </div>
     </div>

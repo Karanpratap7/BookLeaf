@@ -18,7 +18,9 @@
   line-height: 1.45;
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 body {
   margin: 0;
   min-height: 100vh;
@@ -27,13 +29,22 @@ body {
     radial-gradient(circle at 90% 10%, rgba(180, 83, 9, 0.08), transparent 35%),
     linear-gradient(180deg, var(--paper) 0%, #ebe4d4 100%);
 }
-h1, h2, h3, .brand {
+h1,
+h2,
+h3,
+.brand {
   font-family: Fraunces, Georgia, serif;
   font-weight: 700;
   letter-spacing: -0.02em;
 }
-a { color: var(--leaf-dark); text-decoration: none; }
-button, input, select, textarea {
+a {
+  color: var(--leaf-dark);
+  text-decoration: none;
+}
+button,
+input,
+select,
+textarea {
   font: inherit;
 }
 button {
@@ -45,7 +56,9 @@ button {
   padding: 0.65rem 1rem;
   font-weight: 600;
 }
-button:hover { background: var(--leaf-dark); }
+button:hover {
+  background: var(--leaf-dark);
+}
 button.secondary {
   background: transparent;
   color: var(--leaf-dark);
@@ -56,14 +69,19 @@ button.ghost {
   color: var(--muted);
   padding: 0.4rem 0.6rem;
 }
-input, select, textarea {
+input,
+select,
+textarea {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 0.7rem 0.85rem;
   background: var(--cream);
 }
-textarea { min-height: 120px; resize: vertical; }
+textarea {
+  min-height: 120px;
+  resize: vertical;
+}
 label {
   display: block;
   font-size: 0.85rem;
@@ -71,7 +89,9 @@ label {
   margin-bottom: 0.35rem;
   color: var(--muted);
 }
-.field { margin-bottom: 1rem; }
+.field {
+  margin-bottom: 1rem;
+}
 .card {
   background: var(--cream);
   border: 1px solid var(--line);
@@ -84,7 +104,8 @@ label {
   border-collapse: collapse;
   font-size: 0.95rem;
 }
-.table th, .table td {
+.table th,
+.table td {
   text-align: left;
   padding: 0.75rem 0.6rem;
   border-bottom: 1px solid var(--line);
@@ -104,13 +125,35 @@ label {
   font-weight: 700;
   background: var(--paper-2);
 }
-.badge.Critical, .badge.High { background: #ffe4e6; color: var(--danger); }
-.badge.Medium { background: #ffedd5; color: var(--warn); }
-.badge.Low { background: #dcfce7; color: var(--ok); }
-.badge.Open { background: #e0f2fe; color: #075985; }
-.badge[data-status="In Progress"] { background: #fef3c7; color: #92400e; }
-.badge.Resolved, .badge.Closed { background: #dcfce7; color: var(--ok); }
-.muted { color: var(--muted); }
+.badge.Critical,
+.badge.High {
+  background: #ffe4e6;
+  color: var(--danger);
+}
+.badge.Medium {
+  background: #ffedd5;
+  color: var(--warn);
+}
+.badge.Low {
+  background: #dcfce7;
+  color: var(--ok);
+}
+.badge.Open {
+  background: #e0f2fe;
+  color: #075985;
+}
+.badge[data-status='In Progress'] {
+  background: #fef3c7;
+  color: #92400e;
+}
+.badge.Resolved,
+.badge.Closed {
+  background: #dcfce7;
+  color: var(--ok);
+}
+.muted {
+  color: var(--muted);
+}
 .error {
   background: #fff1f2;
   color: var(--danger);
@@ -159,6 +202,19 @@ label {
   gap: 1rem;
 }
 @media (max-width: 800px) {
-  .grid-2 { grid-template-columns: 1fr; }
-  .table-wrap { overflow-x: auto; }
+  .grid-2 {
+    grid-template-columns: 1fr;
+  }
+  .table-wrap {
+    overflow-x: auto;
+  }
+}
+
+/* Queue: urgent and aging unresolved tickets stand out */
+tr.urgent td:first-child {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+tr.aging td:last-child {
+  color: var(--danger);
+  font-weight: 600;
 }
