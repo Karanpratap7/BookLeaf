@@ -10,7 +10,7 @@ Scoring weights: AI integration 25%, architecture/code 25%, API design 15%, func
 
 - `apps/api`: Express + Prisma + zod (TypeScript, run with `tsx`). `app.ts` exports the app, and `index.ts` only calls `listen` for local dev.
 - `apps/web`: Vue 3 + Pinia + vue-router (plain JS). `src/api.js` is the only HTTP client; every path is relative (`/api/...`).
-- `api/[...path].ts`: the single Vercel function. It only re-exports the Express app.
+- `api/index.ts`: the single Vercel function. It only re-exports the Express app.
 - `bookleaf_sample_data.json`: the seed source. Reviewers test with these exact records.
 
 ## Deployment
@@ -91,11 +91,12 @@ Done:
 - Verbatim KB seed with demo tickets.
 - Frontend wired to same-origin `/api`, with polling and urgent/aging queue highlights.
 - README and write-up.
+- Prod migrated and seeded; live at https://bookleaf-beryl.vercel.app
 
 Pending:
-- Apply the migration `20261029120000_ai_fields_and_indexes` to prod and reseed prod.
-- Deploy, then fill in `<LIVE_URL>` in the README.
-- Delete the old Neon Function deploy.
+- Delete the old Neon Function deploy (no longer called).
+- Remove the unused `CORS_ORIGIN` env var on Vercel.
+- Reseed prod right before submission so the demo data is clean.
 
 Pre-ship smoke test:
 - Author flow works end to end, and admin replies show up within about 5s.

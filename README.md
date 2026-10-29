@@ -2,7 +2,7 @@
 
 An author portal and an admin support desk, with AI-assisted ticket triage and AI-drafted replies grounded in the BookLeaf Knowledge Base.
 
-**Live demo:** `<LIVE_URL>`
+**Live demo:** https://bookleaf-beryl.vercel.app
 
 | Role   | Email                                                                     | Password     |
 | ------ | ------------------------------------------------------------------------- | ------------ |
@@ -42,7 +42,7 @@ Vue 3 SPA (apps/web) ──fetch /api/*──▶ Express app (apps/api/app.ts) �
                                            └─▶ services/ai/client.ts ──HTTPS──▶ OpenRouter (gpt-4o-mini)
 ```
 
-- **One backend, one origin.** On Vercel the whole Express app runs as a single function (`api/[...path].ts`), and the SPA is served from the same domain. That means:
+- **One backend, one origin.** On Vercel the whole Express app runs as a single function (`api/index.ts`), and the SPA is served from the same domain. That means:
   - no CORS,
   - no per-route function sprawl (it stays under the Hobby plan limit),
   - the same code runs locally (`index.ts` just calls `listen`).
