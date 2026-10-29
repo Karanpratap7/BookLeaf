@@ -94,7 +94,6 @@ Done:
 - Prod migrated and seeded; live at https://bookleaf-beryl.vercel.app
 
 Pending:
-- Delete the old Neon Function deploy (no longer called).
 - Remove the unused `CORS_ORIGIN` env var on Vercel.
 - Reseed prod right before submission so the demo data is clean.
 
