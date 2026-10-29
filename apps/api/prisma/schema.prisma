@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
@@ -64,6 +65,9 @@ model Ticket {
   categoryOverride String?         @map("category_override")
   priorityOverride String?         @map("priority_override")
   assignedAdminId  String?         @map("assigned_admin_id")
+  aiRationale      String?         @map("ai_rationale")
+  aiDraft          String?         @map("ai_draft")
+  aiDraftSource    String?         @map("ai_draft_source")
   createdAt        DateTime        @default(now()) @map("created_at")
   updatedAt        DateTime        @updatedAt @map("updated_at")
   internalNotes    InternalNote[]
@@ -72,6 +76,8 @@ model Ticket {
   author           User            @relation("AuthorTickets", fields: [authorId], references: [id])
   book             Book?           @relation(fields: [bookId], references: [id])
 
+  @@index([authorId])
+  @@index([status])
   @@map("tickets")
 }
 
