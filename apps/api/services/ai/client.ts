@@ -1,294 +1,283 @@
-import { OpenRouter } from "@openrouter/sdk";
+import { z } from "zod";
+import { CATEGORIES, PRIORITIES } from "../../domain";
+import { nextPayoutDate, formatDate, isRoyaltyOverdue } from "./payout";
 
-export const openrouter = new OpenRouter({
-  apiKey: process.env.OPENROUTER_API_KEY,
+// OpenRouter speaks the OpenAI chat-completions format; plain fetch keeps us dependency-free
+// and lets AbortSignal.timeout enforce a hard deadline.
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const MODEL = process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini";
+
+type ChatMessage = { role: "system" | "user"; content: string };
+
+async function chat(
+  messages: ChatMessage[],
+  opts: { temperature: number; maxTokens: number; timeoutMs: number; json?: boolean; tag: string },
+): Promise<string> {
+  if (!process.env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY not set");
+
+  const res = await fetch(OPENROUTER_URL, {
+    method: "POST",
+    signal: AbortSignal.timeout(opts.timeoutMs),
+    headers: {
+      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      "Content-Type": "application/json",
+      "X-Title": "BookLeaf Support Portal",
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      messages,
+      temperature: opts.temperature,
+      max_tokens: opts.maxTokens,
+      ...(opts.json && { response_format: { type: "json_object" } }),
+    }),
+  });
+  if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 200)}`);
+
+  const data: any = await res.json();
+  const content = data.choices?.[0]?.message?.content?.trim();
+  if (!content) throw new Error("OpenRouter returned an empty completion");
+
+  // Token usage per call, for cost tracking.
+  console.log(
+    `[ai] ${opts.tag} model=${MODEL} prompt_tokens=${data.usage?.prompt_tokens} completion_tokens=${data.usage?.completion_tokens}`,
+  );
+  return content;
+}
+
+// ---------- Classification ----------
+
+export type Classification = {
+  category: (typeof CATEGORIES)[number];
+  priority: (typeof PRIORITIES)[number];
+  rationale: string;
+};
+
+const classificationSchema = z.object({
+  category: z.enum(CATEGORIES),
+  priority: z.enum(PRIORITIES),
+  rationale: z.string().max(300),
 });
 
-export async function withTimeout<T>(
-  promise: Promise<T>,
-  ms: number = 30000
-): Promise<T | null> {
-  let timedOut = false;
-  const timeoutId = setTimeout(() => {
-    timedOut = true;
-  }, ms);
-  const result = await promise
-    .then((data) => data)
-    .catch((err) => {
-      console.error("AI service error:", err.message || err);
-      return null;
-    });
+const CLASSIFY_SYSTEM = `You triage author support tickets for BookLeaf Publishing, a self-publishing company in India and the US.
 
-  clearTimeout(timeoutId);
-  if (timedOut) {
-    console.error("AI service timeout exceeded");
-    return null;
+Pick exactly one category:
+- "Royalty & Payments": royalty amounts, payouts, bank details, sales figures, royalty breakdowns.
+- "ISBN & Metadata Issues": wrong/duplicate ISBN, title, author name, description or other listing data errors.
+- "Printing & Quality": misprints, binding defects, blurry images, colour problems, print turnaround.
+- "Distribution & Availability": book missing or "Currently Unavailable" on Amazon/Flipkart/BookLeaf Store, new listings.
+- "Book Status & Production Updates": where a book is in production (editing, cover design, typesetting, proofreading, printing) or delays.
+- "General Inquiry": anything else (account, bio updates, packages, how-to questions).
+
+Pick exactly one priority:
+- "Critical": money owed and clearly overdue (e.g. no royalty for several months), or a live error actively harming sales (wrong ISBN live on a platform). Author is likely to churn.
+- "High": ISBN/metadata errors (BookLeaf policy treats these as high priority), print quality defects, a published book unavailable for sale, royalty amount disputes.
+- "Medium": production status questions, delays without financial loss, listing timing questions.
+- "Low": informational or cosmetic requests (update bio or description, general how-to).
+Escalate one level if the author reports the issue has persisted for weeks or they have already followed up.
+
+Respond with JSON only: {"category": "...", "priority": "...", "rationale": "<one short sentence>"}`;
+
+export async function classifyTicket(subject: string, description: string): Promise<Classification> {
+  try {
+    const raw = await chat(
+      [
+        { role: "system", content: CLASSIFY_SYSTEM },
+        // Only the ticket text: no KB, no author data. Keeps this call ~500 tokens.
+        { role: "user", content: `Subject: ${subject}\n\n${description.slice(0, 2000)}` },
+      ],
+      { temperature: 0, maxTokens: 120, timeoutMs: 8000, json: true, tag: "classify" },
+    );
+    return classificationSchema.parse(JSON.parse(raw.replace(/```(json)?/g, "")));
+  } catch (err: any) {
+    console.warn("[ai] classify failed, using keyword fallback:", err?.message || err);
+    return classifyLocally(subject, description);
   }
-  return result;
 }
 
-function nextPayoutHint() {
-  const now = new Date();
-  const q = Math.floor(now.getMonth() / 3);
-  const endMonth = (q + 1) * 3; // exclusive end of quarter
-  const quarterEnd = new Date(now.getFullYear(), endMonth, 0);
-  const payout = new Date(quarterEnd);
-  payout.setDate(payout.getDate() + 45);
-  return payout.toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
-}
-
-/** Policy/RAG draft used when OpenRouter is down */
-export function buildPolicyDraft(input: {
-  authorName: string;
-  subject: string;
-  description: string;
-  category: string;
-  bookTitle?: string | null;
-  isbn?: string | null;
-  status?: string | null;
-  royaltyEarned?: number | null;
-  royaltyPending?: number | null;
-  lastPayout?: Date | string | null;
-  chunks?: { title: string; content: string }[];
-}): string {
-  const name = input.authorName || "there";
-  const bookLine = input.bookTitle
-    ? ` regarding *${input.bookTitle}*${input.isbn ? ` (ISBN ${input.isbn})` : ""}`
-    : "";
-  const kbBits = (input.chunks || [])
-    .slice(0, 3)
-    .map((c) => c.content.split(".")[0])
-    .filter(Boolean);
-
-  const pending =
-    input.royaltyPending != null
-      ? `₹${Number(input.royaltyPending).toLocaleString("en-IN")}`
-      : null;
-  const earned =
-    input.royaltyEarned != null
-      ? `₹${Number(input.royaltyEarned).toLocaleString("en-IN")}`
-      : null;
-  const lastPay = input.lastPayout
-    ? new Date(input.lastPayout).toLocaleDateString("en-IN")
-    : null;
-
-  let body = "";
-
-  switch (input.category) {
-    case "Royalty & Payments":
-      body = `Thank you for writing in about royalties${bookLine}. I understand how frustrating delayed or unclear payouts can feel, and I'm sorry for the stress this has caused.
-
-On our side, royalties are calculated quarterly (80% of net profit to the author) and paid within 45 days of quarter-end, with a ₹1,000 minimum threshold. For your account${earned ? `, we currently show ${earned} earned` : ""}${pending ? ` and ${pending} pending` : ""}${lastPay ? `. The last payout on record was ${lastPay}` : pending === "₹0" ? "" : ""}. The next expected payout window lands around ${nextPayoutHint()}, provided the threshold is met and bank details are linked.
-
-I'll have our payments team double-check your ledger and bank linkage and get back to you within 48 hours with a clear status. If anything looks overdue beyond the 45-day window, we'll escalate immediately.`;
-      break;
-    case "ISBN & Metadata Issues":
-      body = `Thank you for flagging this ISBN/metadata concern${bookLine}. You're right to treat this as urgent — mismatched ISBNs can affect listings and reader trust.
-
-I've escalated this to our production team as a high-priority data issue. We'll verify the imprint record against the physical copy and correct the platform metadata. You can expect an update within 48 hours with either a confirmation of the fix or the next corrective step.`;
-      break;
-    case "Printing & Quality":
-      body = `I'm truly sorry about the print quality issue you received${bookLine}. That falls short of the standard we owe you as a partner.
-
-Please reply with clear photos of the defective copies (cover, interior pages, binding). Once verified, BookLeaf will arrange a free reprint. Typical turnaround after verification is 5–7 business days. We'll confirm as soon as the reprint is queued.`;
-      break;
-    case "Distribution & Availability":
-      body = `Thanks for letting us know about the availability issue${bookLine}. "Currently Unavailable" on Amazon/Flipkart is usually a stock sync problem rather than a delisting.
-
-I've asked distribution to trigger a re-sync. Please allow 24–48 hours for the listing to show as available again. If it hasn't recovered after that window, reply on this ticket and we'll escalate with the retailer.`;
-      break;
-    case "Book Status & Production Updates":
-      body = `Thank you for checking in on production${bookLine}. ${input.status ? `Our records currently show status: ${input.status}.` : "I'm reviewing the live production stage now."}
-
-Delays most often happen while we wait on cover approval or proofreading rounds. I'll confirm the exact bottleneck with production and share a specific updated timeline within 48 hours — we'll keep this collaborative and transparent every step of the way.`;
-      break;
-    default:
-      body = `Thank you for reaching out${bookLine}. I've read your note carefully and want to make sure we help you quickly.
-
-Metadata or account updates submitted through support typically reflect on platforms within 3–5 business days. I'll route this to the right team and confirm the next step on this thread within 48 hours.`;
-  }
-
-  if (kbBits.length) {
-    body += `\n\nFor reference from our policies: ${kbBits.join(". ")}.`;
-  }
-
-  body += `\n\nWarm regards,\nBookLeaf Author Support`;
-  return body;
-}
-
-export function classifyLocally(
-  subject: string,
-  description: string
-): { category: string; priority: string; rationale: string } {
+/** Deterministic fallback when the LLM is down, slow, or returns invalid JSON. */
+export function classifyLocally(subject: string, description: string): Classification {
   const text = `${subject} ${description}`.toLowerCase();
-  let category = "General Inquiry";
-  let priority = "Medium";
-
-  if (/royalt|payout|payment|bank|₹|rs\.?|earned|pending/.test(text)) {
-    category = "Royalty & Payments";
-    priority = /month|overdue|haven't|have not|not received|6 month|delay/.test(text)
-      ? "Critical"
-      : "High";
-  } else if (/isbn|metadata|wrong title|duplicate/.test(text)) {
-    category = "ISBN & Metadata Issues";
-    priority = "High";
-  } else if (/print|blurry|binding|misprint|quality|defect/.test(text)) {
-    category = "Printing & Quality";
-    priority = "High";
-  } else if (/unavailable|amazon|flipkart|distribution|stock|listing/.test(text)) {
-    category = "Distribution & Availability";
-    priority = "Medium";
-  } else if (/typeset|cover design|production|editing|proof|status|when will/.test(text)) {
-    category = "Book Status & Production Updates";
-    priority = "Medium";
-  } else if (/bio|description|update|general/.test(text)) {
-    category = "General Inquiry";
-    priority = "Low";
+  const rules: [RegExp, Classification["category"], Classification["priority"]][] = [
+    [/isbn|metadata|wrong (title|author)|duplicate/, "ISBN & Metadata Issues", "High"],
+    [/royalt|payout|payment|bank|₹|earned|paid/, "Royalty & Payments", "High"],
+    [/print|blurry|binding|misprint|misalign|quality|defect/, "Printing & Quality", "High"],
+    [
+      /unavailable|out of stock|not (showing|listed)|listing|distribution/,
+      "Distribution & Availability",
+      "Medium",
+    ],
+    [
+      /typeset|cover design|production|editing|proof|when will|status/,
+      "Book Status & Production Updates",
+      "Medium",
+    ],
+  ];
+  const hit = rules.find(([re]) => re.test(text));
+  let category: Classification["category"] = hit?.[1] ?? "General Inquiry";
+  let priority: Classification["priority"] = hit?.[2] ?? "Low";
+  if (
+    category === "Royalty & Payments" &&
+    /(\d+|several|many) months|haven'?t received|not received|overdue/.test(text)
+  ) {
+    priority = "Critical";
   }
-
-  return {
-    category,
-    priority,
-    rationale: "Local keyword classifier (HF unavailable)",
-  };
+  return { category, priority, rationale: "Keyword rules (AI classifier unavailable)" };
 }
 
-async function chatCompletion(
-  messages: { role: "system" | "user" | "assistant"; content: string }[],
-  opts: { temperature?: number; max_tokens?: number } = {}
-) {
-  let lastError: unknown = null;
-  for (const model of MODEL_CANDIDATES) {
-    try {
-      const completion = await openrouter.chat.send({
-        httpReferer: "http://localhost",
-        appTitle: "BookLeaf",
-        chatRequest: {
-          model,
-          messages,
-          temperature: opts.temperature ?? 0.4,
-          maxTokens: opts.max_tokens ?? 500,
-        },
-      });
-      const raw = completion.choices[0]?.message?.content;
-      const content = typeof raw === "string" ? raw.trim() : Array.isArray(raw) ? raw.map((c) => (typeof c === "string" ? c : JSON.stringify(c))).join(". ") : String(raw);
-      if (content) return { content, model, source: "llm" as const };
-    } catch (err: any) {
-      lastError = err;
-      console.warn(`OpenRouter model failed (${model}):`, err?.status || err?.message);
-    }
-  }
-  throw lastError || new Error("All OpenRouter models failed");
-}
+// ---------- Draft response ----------
 
-/** Prefer free/cheap router models */
-export const MODEL_CANDIDATES = [
-  "nvidia/nemotron-3.5-70b:free",
-  "nvidia/nemotron-3.5-8b:free",
-  "anthropic/claude-3.5-sonnet",
-  "anthropic/claude-3-haiku",
-  "openai/gpt-4o-mini",
-].filter(Boolean);
+type BookFacts = {
+  title: string;
+  isbn: string | null;
+  status: string | null;
+  mrp: number | null;
+  publicationDate: Date | null;
+  totalCopiesSold: number;
+  totalRoyaltyEarned: number;
+  royaltyPaid: number;
+  royaltyPending: number;
+  lastRoyaltyPayoutDate: Date | null;
+  printPartner: string | null;
+  availableOn: unknown;
+};
 
-export async function classifyTicket(
-  subject: string,
-  description: string
-): Promise<{
-  category: string | null;
-  priority: string | null;
-  rationale: string | null;
-}> {
-  try {
-    const completion = await chatCompletion(
-      [
-        {
-          role: "system",
-          content:
-            'You are a strict JSON ticket classifier. Return only valid JSON with keys: category, priority, rationale. Categories: "Royalty & Payments", "ISBN & Metadata Issues", "Printing & Quality", "Distribution & Availability", "Book Status & Production Updates", "General Inquiry". Priority: Critical|High|Medium|Low.',
-        },
-        {
-          role: "user",
-          content: `Subject: ${subject}\nDescription: ${description}\nReturn JSON only.`,
-        },
-      ],
-      { temperature: 0, max_tokens: 200 }
-    );
-
-    const content = completion.content.replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(content);
-    return {
-      category: parsed.category || null,
-      priority: parsed.priority || null,
-      rationale: parsed.rationale || null,
-    };
-  } catch (err) {
-    console.error("Classification falling back to local:", err);
-    const local = classifyLocally(subject, description);
-    return local;
-  }
-}
-
-export async function generateDraft(input: {
+export type DraftInput = {
   authorName: string;
   subject: string;
   description: string;
+  latestMessage: string | null;
   category: string;
-  bookTitle?: string | null;
-  isbn?: string | null;
-  status?: string | null;
-  royaltyEarned?: number | null;
-  royaltyPending?: number | null;
-  lastPayout?: Date | string | null;
-  chunks?: { title: string; content: string }[];
-}): Promise<{ draft: string; source: "llm" | "policy"; model?: string }> {
-  const kb =
-    (input.chunks || [])
-      .map((c, i) => `${i + 1}. ${c.title}: ${c.content}`)
-      .join("\n") || "No KB chunks";
+  book: BookFacts | null;
+  otherBooks: BookFacts[];
+  chunks: { title: string; content: string }[];
+};
+
+export type DraftResult = { draft: string; source: "llm" | "policy"; model?: string; notice: string };
+
+const inr = (n: number | null | undefined) => (n == null ? "not available" : `₹${n.toLocaleString("en-IN")}`);
+
+function bookFacts(b: BookFacts): string {
+  const platforms =
+    Array.isArray(b.availableOn) && b.availableOn.length ? b.availableOn.join(", ") : "none yet";
+  return [
+    `Title: ${b.title}`,
+    `ISBN: ${b.isbn ?? "not yet assigned"}`,
+    `Status: ${b.status ?? "unknown"}`,
+    `Publication date: ${formatDate(b.publicationDate)}`,
+    `MRP: ${inr(b.mrp)}`,
+    `Copies sold: ${b.totalCopiesSold}`,
+    `Royalty earned: ${inr(b.totalRoyaltyEarned)}, paid: ${inr(b.royaltyPaid)}, pending: ${inr(b.royaltyPending)}`,
+    `Last royalty payout: ${formatDate(b.lastRoyaltyPayoutDate)}`,
+    `Royalty payout overdue: ${
+      isRoyaltyOverdue(b)
+        ? "YES. Pending is above the ₹1,000 threshold and no payout in over two quarterly cycles. This is on BookLeaf: own it, apologise, and commit to resolution within 48 hours."
+        : "no"
+    }`,
+    `Print partner: ${b.printPartner ?? "not assigned"}`,
+    `Available on: ${platforms}`,
+  ].join("\n");
+}
+
+// Tone rules come straight from the BookLeaf KB "Communication Tone Guidelines".
+const DRAFT_SYSTEM = `You are a member of the BookLeaf Publishing author support team, writing a reply that a colleague will review before sending.
+
+How BookLeaf writes to authors:
+- Authors are partners, not customers to be managed. Be empathetic and professional.
+- Acknowledge the author's concern before moving to solutions.
+- Be specific: use the actual numbers, dates and statuses from ACCOUNT FACTS. No vague reassurances.
+- If something is BookLeaf's fault (delayed royalties, ISBN error), own it directly. No corporate deflection.
+- If escalation or investigation is needed, give a clear timeline (e.g. "within 48 hours"), never open-ended promises.
+- Never blame the author, even if a delay is on their side; frame it collaboratively.
+- Always end with a clear next step for the author and/or the BookLeaf team.
+
+Hard rules:
+- State only policies found in POLICY CONTEXT and facts found in ACCOUNT FACTS. Never invent amounts, dates, tracking numbers or policies.
+- If a needed fact is missing, say the team will check it and give a timeline.
+- Plain text, no markdown, no headings. 120–220 words.
+- Start with "Hi <first name>," and sign off with "Warm regards,\\nBookLeaf Author Support".`;
+
+export async function generateDraft(input: DraftInput): Promise<DraftResult> {
+  const firstName = input.authorName.split(" ")[0];
+  const facts = input.book
+    ? bookFacts(input.book)
+    : input.otherBooks.length
+      ? "No specific book selected. Author's books:\n" +
+        input.otherBooks
+          .map((b) => `- ${b.title} (${b.status ?? "unknown"}), royalty pending ${inr(b.royaltyPending)}`)
+          .join("\n")
+      : "No books on this account yet.";
+
+  // Cost: only the KB sections for this ticket's category (~300 tokens) are sent, not the whole KB,
+  // and only the original query plus the latest author follow-up, not the full thread.
+  const user = `POLICY CONTEXT (${input.category}):
+${input.chunks.map((c) => `[${c.title}] ${c.content}`).join("\n") || "No category-specific policy available."}
+
+ACCOUNT FACTS:
+Author: ${input.authorName}
+Today: ${formatDate(new Date())}
+Next scheduled royalty payout date: ${formatDate(nextPayoutDate())}
+${facts}
+
+TICKET (${input.category}):
+Subject: ${input.subject}
+Message: ${input.description.slice(0, 2000)}${input.latestMessage ? `\nLatest follow-up from author: ${input.latestMessage.slice(0, 1000)}` : ""}
+
+Write the reply to ${firstName}.`;
 
   try {
-    const completion = await chatCompletion(
+    const draft = await chat(
       [
-        {
-          role: "system",
-          content: `You are a BookLeaf support representative. Empathize first, use specific numbers, own BookLeaf faults when true, give a clear next step/timeline. Max 200 words. Tone: professional, warm, partner-focused.`,
-        },
-        {
-          role: "user",
-          content: `Author: ${input.authorName}
-Book: ${input.bookTitle || "N/A"} (${input.isbn || "N/A"})
-Status: ${input.status || "N/A"}
-Royalty earned: ₹${input.royaltyEarned ?? "N/A"}
-Royalty pending: ₹${input.royaltyPending ?? "N/A"}
-Last payout: ${input.lastPayout || "N/A"}
-Category: ${input.category}
-
-Subject: ${input.subject}
-Query: ${input.description}
-
-Knowledge Base:
-${kb}
-
-Write the draft only.`,
-        },
+        { role: "system", content: DRAFT_SYSTEM },
+        { role: "user", content: user },
       ],
-      { temperature: 0.6, max_tokens: 450 }
+      { temperature: 0.4, maxTokens: 450, timeoutMs: 20000, tag: "draft" },
     );
-
-    return {
-      draft: completion.content,
-      source: "llm",
-      model: completion.model,
-    };
-  } catch (err) {
-    console.error("Draft LLM failed; using policy/RAG fallback:", err);
+    return { draft, source: "llm", model: MODEL, notice: "AI draft. Review and edit before sending." };
+  } catch (err: any) {
+    console.warn("[ai] draft failed, using policy template:", err?.message || err);
     return {
       draft: buildPolicyDraft(input),
       source: "policy",
+      notice:
+        "AI is unavailable right now. This is a policy template with the author's data filled in; review it or write your own reply.",
     };
   }
+}
+
+/** Deterministic, KB-accurate template used when the LLM is unavailable. */
+export function buildPolicyDraft(input: DraftInput): string {
+  const firstName = input.authorName.split(" ")[0];
+  const b = input.book;
+  const about = b ? ` about "${b.title}"` : "";
+  let body: string;
+
+  switch (input.category) {
+    case "Royalty & Payments":
+      body = `Thank you for writing to us${about}, and I'm sorry for any worry this has caused. Royalties are calculated quarterly and paid within 45 days of the quarter ending, by bank transfer to the account linked in your dashboard. Your share is 80% of the net profit per copy (MRP minus printing cost, platform commission and shipping), and payouts are made once the accumulated amount crosses ₹1,000; smaller amounts roll over to the next quarter.${
+        b
+          ? ` For this title we show ${b.totalCopiesSold} copies sold, ${inr(b.totalRoyaltyEarned)} earned, ${inr(b.royaltyPaid)} paid and ${inr(b.royaltyPending)} pending. ${b.lastRoyaltyPayoutDate ? `The last payout was on ${formatDate(b.lastRoyaltyPayoutDate)}.` : "No payout has been made on this title yet."}`
+          : ""
+      } The next payout is scheduled for ${formatDate(nextPayoutDate())}.\n\nOur payments team will verify your royalty ledger and bank details and get back to you within 48 hours with a line-by-line breakdown. If anything is overdue, we will escalate it immediately.`;
+      break;
+    case "ISBN & Metadata Issues":
+      body = `Thank you for flagging this${about}. An ISBN or metadata mismatch is a serious data issue, and we're treating it as high priority.${b?.isbn ? ` Our records show ISBN ${b.isbn} for this title.` : ""}\n\nI have escalated this to our production team, who will verify the record and correct it across platforms. You will hear back from us within 48 hours.`;
+      break;
+    case "Printing & Quality":
+      body = `I'm sorry about the print quality issue${about}. That is not the standard we hold ourselves to.\n\nCould you reply with clear photos of the defective copies (cover, affected pages and binding)? Once we verify them, BookLeaf will arrange a free reprint, which typically takes 5–7 business days.`;
+      break;
+    case "Distribution & Availability":
+      body = `Thank you for letting us know${about}. When a published book shows as unavailable, it is usually a stock sync issue between our warehouse and the platform.${
+        b && Array.isArray(b.availableOn) && b.availableOn.length
+          ? ` This title is listed on ${b.availableOn.join(", ")}.`
+          : ""
+      }\n\nI am asking our distribution team to trigger a re-sync now. The listing should be live again within 24–48 hours, and we will confirm here once it is.`;
+      break;
+    case "Book Status & Production Updates":
+      body = `Thank you for checking in${about}. I understand waiting on production can be frustrating.${b?.status ? ` Our records show the current stage as "${b.status}".` : ""} Delays most often happen at cover design approval and proofreading revision rounds.\n\nI will confirm the exact status with our production team and share a specific updated timeline within 48 hours.`;
+      break;
+    default:
+      body = `Thank you for reaching out${about}. I have read your message and want to make sure it gets to the right team quickly.\n\nWe will look into this and get back to you on this ticket within 48 hours with a clear next step.`;
+  }
+
+  return `Hi ${firstName},\n\n${body}\n\nWarm regards,\nBookLeaf Author Support`;
 }
