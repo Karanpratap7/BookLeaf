@@ -3,12 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "setup": "npm install && cd apps/api && npx prisma generate && npx prisma migrate reset --force && npx prisma migrate dev --name init && npx tsx scripts/seed.js",
+    "setup": "npm ci --prefix apps/api && npm ci --prefix apps/web && npm run db:generate",
     "db:generate": "cd apps/api && npx prisma generate",
-    "db:migrate": "cd apps/api && npx prisma migrate dev --name init",
+    "db:migrate": "cd apps/api && npx prisma migrate deploy",
     "db:seed": "cd apps/api && npx tsx scripts/seed.js",
-    "dev:api": "cd apps/api && npx tsx index.ts",
+    "dev:api": "cd apps/api && npx tsx watch index.ts",
     "dev:web": "cd apps/web && npm run dev",
-    "dev": "bash /tmp/run_bookleaf.sh"
+    "dev": "npm run dev:api & npm run dev:web",
+    "test": "cd apps/api && npx tsx --test services/ai/*.test.ts",
+    "typecheck": "cd apps/api && npx tsc --noEmit",
+    "format": "npx prettier@3 --write \"apps/api/**/*.{ts,js}\" \"apps/web/src/**/*.{js,vue,css}\" \"api/**/*.ts\""
   }
 }
