@@ -35,7 +35,7 @@ async function submit() {
     })
     router.push(`/author/tickets/${ticket.id}`)
   } catch (e) {
-    error.value = e.message
+    error.value = e.details?.map((d) => d.message).join('. ') || e.message
   } finally {
     loading.value = false
   }
@@ -56,11 +56,23 @@ async function submit() {
       </div>
       <div class="field">
         <label>Subject</label>
-        <input v-model="subject" required maxlength="200" placeholder="Short summary of your issue" />
+        <input
+          v-model="subject"
+          required
+          minlength="3"
+          maxlength="200"
+          placeholder="Short summary of your issue"
+        />
       </div>
       <div class="field">
         <label>Description</label>
-        <textarea v-model="description" required placeholder="Share details, dates, and what you need help with" />
+        <textarea
+          v-model="description"
+          required
+          minlength="10"
+          maxlength="5000"
+          placeholder="Share details, dates, and what you need help with"
+        />
       </div>
       <div class="field">
         <label>Attachment (UI only)</label>
@@ -69,7 +81,9 @@ async function submit() {
           Selected: {{ fileName }} (not uploaded — demo UI only)
         </div>
       </div>
-      <button type="submit" :disabled="loading">{{ loading ? 'Submitting…' : 'Submit ticket' }}</button>
+      <button type="submit" :disabled="loading">
+        {{ loading ? 'Submitting…' : 'Submit ticket' }}
+      </button>
     </form>
   </div>
 </template>

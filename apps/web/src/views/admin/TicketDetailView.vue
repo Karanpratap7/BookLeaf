@@ -6,8 +6,9 @@ import { api } from '../../api'
 const route = useRoute()
 const ticket = ref(null)
 const error = ref('')
-const draft = ref('')
 const draftMsg = ref('')
+const draftSource = ref('')
+const drafting = ref(false)
 const reply = ref('')
 const note = ref('')
 const status = ref('')
@@ -24,12 +25,8 @@ const categories = [
   'General Inquiry',
 ]
 
-const displayCategory = computed(
-  () => ticket.value?.categoryOverride || ticket.value?.category
-)
-const displayPriority = computed(
-  () => ticket.value?.priorityOverride || ticket.value?.priority
-)
+const displayCategory = computed(() => ticket.value?.categoryOverride || ticket.value?.category)
+const displayPriority = computed(() => ticket.value?.priorityOverride || ticket.value?.priority)
 
 async function load() {
   ticket.value = await api.adminTicket(route.params.id)
@@ -41,32 +38,41 @@ async function load() {
 onMounted(async () => {
   try {
     await load()
-    await generateDraft()
+    await generateDraft(false)
   } catch (e) {
     error.value = e.message
   }
 })
 
-async function generateDraft() {
-  draftMsg.value = 'Generating AI draft…'
+// Drafts are cached server-side per ticket; regenerate=true forces a fresh LLM call.
+async function generateDraft(regenerate) {
+  drafting.value = true
+  draftMsg.value = 'Generating draft…'
   try {
-    const data = await api.aiDraft(route.params.id)
-    draft.value = data.draft || ''
+    const data = await api.aiDraft(route.params.id, regenerate)
     reply.value = data.draft || ''
-    draftMsg.value = data.error || (data.draft ? 'AI draft ready — edit before sending.' : 'Draft unavailable — write manually.')
+    draftSource.value = data.source
+    draftMsg.value = data.cached
+      ? 'Saved draft for this ticket. Edit it before sending, or regenerate.'
+      : data.notice
   } catch (e) {
-    draft.value = ''
-    draftMsg.value = 'Draft unavailable — write manually.'
+    draftSource.value = ''
+    draftMsg.value = 'Draft unavailable. Please write the reply manually.'
+  } finally {
+    drafting.value = false
   }
 }
 
 async function saveMeta() {
   busy.value = true
   try {
+    // Picking the AI's own value clears the override (null), so AI vs human stays auditable.
     await api.patchTicket(route.params.id, {
       status: status.value,
-      categoryOverride: categoryOverride.value,
-      priorityOverride: priorityOverride.value,
+      categoryOverride:
+        categoryOverride.value === ticket.value.category ? null : categoryOverride.value,
+      priorityOverride:
+        priorityOverride.value === ticket.value.priority ? null : priorityOverride.value,
     })
     await load()
   } catch (e) {
@@ -123,17 +129,27 @@ async function addNote() {
     <div v-if="error" class="error" style="margin-top: 1rem">{{ error }}</div>
     <div v-else-if="!ticket" class="empty">Loading ticket…</div>
     <template v-else>
-      <div style="display: flex; justify-content: space-between; gap: 1rem; margin-top: 0.75rem; flex-wrap: wrap">
+      <div
+        style="
+          display: flex;
+          justify-content: space-between;
+          gap: 1rem;
+          margin-top: 0.75rem;
+          flex-wrap: wrap;
+        "
+      >
         <div>
           <h2 style="margin: 0">{{ ticket.subject }}</h2>
           <p class="muted">
-            {{ ticket.author?.name }} ({{ ticket.author?.email }})
-            · {{ ticket.book?.title || 'General / Account Level' }}
+            {{ ticket.author?.name }} ({{ ticket.author?.email }}) ·
+            {{ ticket.book?.title || 'General / Account Level' }}
           </p>
         </div>
         <div style="display: flex; gap: 0.5rem; align-items: center">
           <span class="badge" :class="displayPriority">{{ displayPriority }}</span>
-          <span class="badge" :class="ticket.status" data-status="ticket.status">{{ ticket.status }}</span>
+          <span class="badge" :class="ticket.status" :data-status="ticket.status">{{
+            ticket.status
+          }}</span>
         </div>
       </div>
 
@@ -142,7 +158,12 @@ async function addNote() {
           <h3 style="margin-top: 0">Author query</h3>
           <p style="white-space: pre-wrap">{{ ticket.description }}</p>
           <p class="muted" style="font-size: 0.85rem">
-            AI category: {{ ticket.category }} · AI priority: {{ ticket.priority }}
+            AI suggested: {{ ticket.category }} · {{ ticket.priority }}
+            <template v-if="ticket.categoryOverride || ticket.priorityOverride">
+              (overridden by admin)</template
+            >
+            <br v-if="ticket.aiRationale" />
+            <em v-if="ticket.aiRationale">{{ ticket.aiRationale }}</em>
           </p>
 
           <h3>Conversation</h3>
@@ -208,18 +229,35 @@ async function addNote() {
           <div class="field" style="margin-top: 0.75rem">
             <textarea v-model="note" placeholder="Note visible only to admins" />
           </div>
-          <button class="secondary" type="button" :disabled="busy" @click="addNote">Add note</button>
+          <button class="secondary" type="button" :disabled="busy" @click="addNote">
+            Add note
+          </button>
         </div>
       </div>
 
       <div class="card" style="margin-top: 1rem">
         <div style="display: flex; justify-content: space-between; gap: 1rem; align-items: center">
-          <h3 style="margin: 0">AI draft response</h3>
-          <button class="secondary" type="button" @click="generateDraft">Regenerate</button>
+          <h3 style="margin: 0">
+            Draft response
+            <span
+              v-if="draftSource"
+              class="badge"
+              :class="draftSource === 'llm' ? 'Low' : 'Medium'"
+            >
+              {{ draftSource === 'llm' ? 'AI' : 'Policy template' }}
+            </span>
+          </h3>
+          <button class="secondary" type="button" :disabled="drafting" @click="generateDraft(true)">
+            Regenerate
+          </button>
         </div>
         <p class="muted" style="font-size: 0.9rem">{{ draftMsg }}</p>
         <div class="field">
-          <textarea v-model="reply" rows="8" placeholder="Edit the draft, then send to the author" />
+          <textarea
+            v-model="reply"
+            rows="8"
+            placeholder="Edit the draft, then send to the author"
+          />
         </div>
         <button type="button" :disabled="busy || !reply.trim()" @click="sendReply">
           Send response to author

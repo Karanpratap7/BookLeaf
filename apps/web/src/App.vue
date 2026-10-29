@@ -20,9 +20,7 @@ function logout() {
     <header v-if="showNav" class="topbar">
       <div>
         <div class="brand">BookLeaf</div>
-        <div class="muted" style="font-size: 0.85rem">
-          {{ auth.user?.name }} · {{ auth.role }}
-        </div>
+        <div class="muted" style="font-size: 0.85rem">{{ auth.user?.name }} · {{ auth.role }}</div>
       </div>
       <nav class="nav">
         <template v-if="auth.isAuthor">

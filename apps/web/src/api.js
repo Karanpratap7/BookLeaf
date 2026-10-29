@@ -1,6 +1,3 @@
-const API = ''  // Vercel base URL (for non-Prisma routes)
-const NEON_FUNCTION_URL = 'https://br-jolly-surf-aoythdu2-ticketsapi.compute.c-2.ap-southeast-1.aws.neon.tech'  // Neon Functions base URL
-
 function headers() {
   const h = { 'Content-Type': 'application/json' }
   const token = localStorage.getItem('token')
@@ -8,28 +5,8 @@ function headers() {
   return h
 }
 
-// Generic fetch function that supports both Vercel and Neon URLs
 async function request(path, options = {}) {
-  // Determine which base URL to use based on the path
-  // Auth routes go to Vercel (CORS works there), Prisma routes go to Neon
-  const neonPaths = [
-    '/api/tickets/mine',
-    '/api/admin/tickets',
-    '/api/admin/tickets/[id]',
-    '/api/admin/tickets/[id]/ai-draft',
-    '/api/admin/tickets/[id]/notes',
-    '/api/admin/tickets/[id]/responses',
-    '/api/admin/stats',
-    '/api/tickets/[id]',
-    '/api/tickets/[id]/messages',
-    '/api/authors/me/books',
-  ]
-  
-  // Use Neon Functions for Prisma-dependent routes, Vercel for non-Prisma routes
-  const useNeon = neonPaths.includes(path)
-  const baseURL = useNeon ? NEON_FUNCTION_URL : API
-  
-  const res = await fetch(`${baseURL}${path}`, {
+  const res = await fetch(path, {
     ...options,
     headers: { ...headers(), ...(options.headers || {}) },
   })
@@ -40,6 +17,11 @@ async function request(path, options = {}) {
   } catch {
     data = { error: text || 'Invalid response' }
   }
+  // Expired/invalid session: drop it and send the user back to login.
+  if (res.status === 401 && path !== '/api/auth/login') {
+    localStorage.clear()
+    window.location.assign('/login')
+  }
   if (!res.ok) {
     const err = new Error(data?.error || `Request failed (${res.status})`)
     err.status = res.status
@@ -49,18 +31,15 @@ async function request(path, options = {}) {
   return data
 }
 
-// API endpoints - mix of Vercel and Neon routes
 export const api = {
-  // Vercel routes (have working CORS - login, books, health)
   login: (email, password) =>
     request('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     }),
   me: () => request('/api/auth/me'),
-  myBooks: () => request('/api/books'),
-  
-  // Neon Functions routes (Prisma-dependent)
+  myBooks: () => request('/api/authors/me/books'),
+
   myTickets: () => request('/api/tickets/mine'),
   ticket: (id) => request(`/api/tickets/${id}`),
   createTicket: (payload) =>
@@ -70,7 +49,7 @@ export const api = {
     }),
   adminTickets: (params = {}) => {
     const q = new URLSearchParams(
-      Object.fromEntries(Object.entries(params).filter(([, v]) => v))
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v)),
     ).toString()
     return request(`/api/admin/tickets${q ? `?${q}` : ''}`)
   },
@@ -90,8 +69,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ body }),
     }),
-  aiDraft: (id) =>
-    request(`/api/admin/tickets/${id}/ai-draft`, { method: 'POST' }),
+  aiDraft: (id, regenerate = false) =>
+    request(`/api/admin/tickets/${id}/ai-draft${regenerate ? '?regenerate=1' : ''}`, {
+      method: 'POST',
+    }),
   replyToTicket: (id, body) =>
     request(`/api/tickets/${id}/messages`, {
       method: 'POST',

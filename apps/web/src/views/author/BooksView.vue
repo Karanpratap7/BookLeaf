@@ -52,11 +52,15 @@ onMounted(async () => {
         </thead>
         <tbody>
           <tr v-for="b in books" :key="b.id">
-            <td><strong>{{ b.title }}</strong></td>
+            <td>
+              <strong>{{ b.title }}</strong>
+            </td>
             <td>{{ b.isbn || '—' }}</td>
             <td>{{ b.genre || '—' }}</td>
             <td>{{ date(b.publicationDate) }}</td>
-            <td><span class="badge" data-status="b.status">{{ b.status }}</span></td>
+            <td>
+              <span class="badge" :data-status="b.status">{{ b.status }}</span>
+            </td>
             <td>{{ money(b.mrp) }}</td>
             <td>{{ b.totalCopiesSold }}</td>
             <td>{{ money(b.totalRoyaltyEarned) }}</td>
