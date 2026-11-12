@@ -130,7 +130,7 @@ async function submit() {
         <button
           type="button"
           @click="askPolicy"
-          :disabled="!subject.value.trim() || !description.value.trim()"
+          :disabled="!subject.trim() || !description.trim()"
           style="
             width: 100%;
             padding: 0.75rem;
