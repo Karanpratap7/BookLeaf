@@ -1,13 +1,14 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, computed } from 'vue'
 import { api } from '../../api'
 
 const tickets = ref([])
 const error = ref('')
 const loading = ref(true)
 let timer
+const salesInsights = ref(null)
 
-async function load() {
+async function loadTickets() {
   try {
     tickets.value = await api.myTickets()
     error.value = ''
@@ -18,9 +19,30 @@ async function load() {
   }
 }
 
-onMounted(() => {
-  load()
-  timer = setInterval(() => !document.hidden && load(), 5000)
+async function loadRoyaltyAnalytics() {
+  try {
+    const data = await api.royaltyAnalytics()
+    console.log('Royalty analytics:', data)
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function loadSalesInsights() {
+  try {
+    const data = await api.salesInsights()
+    salesInsights.value = data
+    console.log('Sales insights:', data)
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+onMounted(async () => {
+  await loadTickets()
+  await loadRoyaltyAnalytics()
+  await loadSalesInsights()
+  timer = setInterval(() => !document.hidden && loadTickets(), 5000)
 })
 onUnmounted(() => clearInterval(timer))
 </script>
@@ -39,6 +61,32 @@ onUnmounted(() => clearInterval(timer))
     <div v-else-if="!tickets.length" class="empty">
       No tickets yet. Raise a support query to get started.
     </div>
+
+    <!-- Royalty Analytics Card -->
+    <div v-if="tickets.length > 0" class="card" style="margin-top: 1rem; padding: 1rem;">
+      <h3 style="margin-top: 0">Royalty Analytics</h3>
+      <p class="muted" style="font-size: 0.85rem; margin-bottom: 0.5rem">
+        Loading your royalty data…
+      </p>    <!-- Sales Insights Card -->
+    <div v-if="salesInsights.value" class="card" style="margin-top: 1rem; padding: 1rem;">
+      <h3 style="margin-top: 0">AI Sales Insights</h3>
+      <p class="muted" style="font-size: 0.85rem; margin-bottom: 0.5rem">
+        AI-analyzed trends for your books
+      </p>
+      <div v-if="salesInsights.value.genreStats" style="margin-top: 0.5rem">
+        <strong>Best Selling Genre:</strong> {{ salesInsights.value.bestSellingGenre.genre }}
+        <span v-if="salesInsights.value.bestSellingGenre.totalCopies > 0">({{ salesInsights.value.bestSellingGenre.totalCopies }} copies)</span>
+        <br />
+        <strong>Best Selling Title:</strong> {{ salesInsights.value.bestSellingTitle.title }}
+        <span v-if="salesInsights.value.bestSellingTitle.copies > 0">({{ salesInsights.value.bestSellingTitle.copies }} copies)</span>
+        <br />
+        <strong>Average Royalty per Copy:</strong> {{ salesInsights.value.avgRoyaltyPerCopy }}
+      </div>
+    </div>
+
+
+    </div>
+
     <div v-else class="card" style="padding: 0">
       <div
         v-for="t in tickets"

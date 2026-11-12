@@ -78,4 +78,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ body }),
     }),
+  royaltyAnalytics: () => request('/api/authors/me/royalty-analytics'),
+  salesInsights: () => request('/api/ai/sales-insights'),
 }
