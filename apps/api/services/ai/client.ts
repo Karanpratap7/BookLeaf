@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CATEGORIES, PRIORITIES } from "../../domain";
 import { nextPayoutDate, formatDate, isRoyaltyOverdue } from "./payout";
+import type { ScoredChunk } from "./retrieval";
 
 // OpenRouter speaks the OpenAI chat-completions format; plain fetch keeps us dependency-free
 // and lets AbortSignal.timeout enforce a hard deadline.
@@ -130,6 +131,8 @@ export function classifyLocally(subject: string, description: string): Classific
   }
   return { category, priority, rationale: "Keyword rules (AI classifier unavailable)" };
 }
+
+export type { BookFacts };
 
 // ---------- Draft response ----------
 
@@ -287,4 +290,138 @@ export function buildPolicyDraft(input: DraftInput): string {
   }
 
   return `Hi ${firstName},\n\n${body}\n\nWarm regards,\nBookLeaf Author Support`;
+}
+
+// ---------- Grounded answer for authors ----------
+
+export type AnswerResult =
+  | { answered: false; ticketSuggestion: true }
+  | {
+      answered: true;
+      answer: string;
+      sources: { title: string; category: string | null; score: number }[];
+      model: string;
+    };
+
+const ANSWER_SYSTEM = `You are BookLeaf Author Support. Answer the author's question using ONLY the provided policy context and account facts.
+
+Rules:
+- Ground every statement in POLICY CONTEXT or ACCOUNT FACTS. Never invent policies, amounts, dates, or procedures.
+- If a fact is not in the context, say "I don't have that information" and suggest filing a ticket.
+- Be empathetic, specific, and professional. Use Indian English conventions (₹, lakhs/crores).
+- Plain text, no markdown. 80–160 words.
+- Start with "Hi <first name>," and sign off with "Warm regards,\\nBookLeaf Author Support".
+- If the question is not covered by the policy context, do NOT answer — the caller will refuse.`;
+
+export async function answerQuestion(
+  question: string,
+  authorName: string,
+  bookFacts: {
+    title: string;
+    isbn: string | null;
+    status: string | null;
+    mrp: number | null;
+    publicationDate: Date | null;
+    totalCopiesSold: number;
+    totalRoyaltyEarned: number;
+    royaltyPaid: number;
+    royaltyPending: number;
+    lastRoyaltyPayoutDate: Date | null;
+    printPartner: string | null;
+    availableOn: unknown;
+  } | null,
+  otherBooks: Array<{
+    title: string;
+    isbn: string | null;
+    status: string | null;
+    mrp: number | null;
+    publicationDate: Date | null;
+    totalCopiesSold: number;
+    totalRoyaltyEarned: number;
+    royaltyPaid: number;
+    royaltyPending: number;
+    lastRoyaltyPayoutDate: Date | null;
+    printPartner: string | null;
+    availableOn: unknown;
+  }>,
+  chunks: ScoredChunk[],
+): Promise<AnswerResult> {
+  const firstName = authorName.split(" ")[0];
+
+  const facts = bookFacts
+    ? `Title: ${bookFacts.title}
+ISBN: ${bookFacts.isbn ?? "not yet assigned"}
+Status: ${bookFacts.status ?? "unknown"}
+Publication date: ${formatDate(bookFacts.publicationDate)}
+MRP: ${bookFacts.mrp == null ? "not available" : `₹${bookFacts.mrp.toLocaleString("en-IN")}`}
+Copies sold: ${bookFacts.totalCopiesSold}
+Royalty earned: ${bookFacts.totalRoyaltyEarned == null ? "not available" : `₹${bookFacts.totalRoyaltyEarned.toLocaleString("en-IN")}`}, paid: ${bookFacts.royaltyPaid == null ? "not available" : `₹${bookFacts.royaltyPaid.toLocaleString("en-IN")}`}, pending: ${bookFacts.royaltyPending == null ? "not available" : `₹${bookFacts.royaltyPending.toLocaleString("en-IN")}`}
+Last royalty payout: ${formatDate(bookFacts.lastRoyaltyPayoutDate)}
+Royalty payout overdue: ${isRoyaltyOverdue(bookFacts, new Date()) ? "YES" : "no"}
+Print partner: ${bookFacts.printPartner ?? "not assigned"}
+Available on: ${Array.isArray(bookFacts.availableOn) && bookFacts.availableOn.length ? bookFacts.availableOn.join(", ") : "none yet"}`
+    : otherBooks.length
+      ? "No specific book selected. Author's books:\n" +
+        otherBooks
+          .map(
+            (b) =>
+              `- ${b.title} (${b.status ?? "unknown"}), royalty pending ${b.royaltyPending == null ? "not available" : `₹${b.royaltyPending.toLocaleString("en-IN")}`}`,
+          )
+          .join("\n")
+      : "No books on this account yet.";
+
+  const policyContext =
+    chunks.map((c) => `[${c.title}] ${c.content}`).join("\n") || "No category-specific policy available.";
+
+  const user = `POLICY CONTEXT:
+${policyContext}
+
+ACCOUNT FACTS:
+Author: ${authorName}
+Today: ${formatDate(new Date())}
+Next scheduled royalty payout date: ${formatDate(nextPayoutDate())}
+${facts}
+
+QUESTION:
+${question}
+
+Write the answer to ${firstName}.`;
+
+  try {
+    const answer = await chat(
+      [
+        { role: "system", content: ANSWER_SYSTEM },
+        { role: "user", content: user },
+      ],
+      { temperature: 0.2, maxTokens: 350, timeoutMs: 15000, tag: "answer" },
+    );
+    return {
+      answered: true,
+      answer,
+      sources: chunks.map((c) => ({
+        title: c.title,
+        category: c.category ?? null,
+        score: Number(c.score.toFixed(3)),
+      })),
+      model: MODEL,
+    };
+  } catch (err: any) {
+    console.warn("[ai] answer failed, using policy fallback:", err?.message || err);
+    // Deterministic KB fallback: find the best matching chunk and use its content as the basis
+    const best = chunks[0];
+    if (!best) {
+      return { answered: false, ticketSuggestion: true };
+    }
+    const fallbackAnswer = `Hi ${firstName},\n\nThank you for your question. Based on our ${best.title.toLowerCase()} policy: ${best.content.slice(0, 500)}\n\nIf you need more specific help, please raise a ticket and our team will investigate.\n\nWarm regards,\nBookLeaf Author Support`;
+    return {
+      answered: true,
+      answer: fallbackAnswer,
+      sources: chunks.map((c) => ({
+        title: c.title,
+        category: c.category ?? null,
+        score: Number(c.score.toFixed(3)),
+      })),
+      model: "policy-fallback",
+    };
+  }
 }

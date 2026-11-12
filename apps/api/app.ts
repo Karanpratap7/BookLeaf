@@ -10,7 +10,8 @@ import { PrismaClient, Prisma } from "@prisma/client";
 import { z } from "zod";
 import { authenticateJWT, authorizeRoles, errorHandler } from "./middleware/auth.middleware";
 import { validate } from "./middleware/validate.middleware";
-import { classifyTicket, generateDraft } from "./services/ai/client";
+import { classifyTicket, generateDraft, answerQuestion } from "./services/ai/client";
+import { rankChunks } from "./services/ai/retrieval";
 import { nextPayoutDate, formatDate, isRoyaltyOverdue } from "./services/ai/payout";
 import { summariseSales, topSellersByCopies } from "./services/ai/sales-insights";
 import { retrieveForDraft } from "./services/ai/retrieval";
@@ -328,6 +329,61 @@ app.get("/api/ai/sales-insights", authenticateJWT, authorizeRoles("AUTHOR"), asy
     analysisDate: now.toISOString(),
   });
 });
+
+// ---------- AI Answer (Author) ----------
+
+const answerSchema = z.object({
+  body: z.object({
+    question: z.string().trim().min(5).max(2000),
+    bookId: z.string().uuid().nullish(),
+  }),
+});
+
+app.post(
+  "/api/ai/answer",
+  authenticateJWT,
+  authorizeRoles("AUTHOR"),
+  validate(answerSchema),
+  async (req, res) => {
+    const authorId = req.user!.id;
+    const { question, bookId } = req.body;
+
+    // Fetch author with books for facts
+    const author = await prisma.user.findUnique({
+      where: { id: authorId },
+      include: { books: true },
+    });
+    if (!author) return res.status(404).json({ error: "Author not found" });
+
+    // If bookId provided, verify it belongs to this author and get that book's facts
+    let selectedBook: (typeof author.books)[0] | null = null;
+    let otherBooks = author.books;
+    if (bookId) {
+      selectedBook = author.books.find((b) => b.id === bookId) || null;
+      if (!selectedBook) {
+        return res.status(400).json({
+          error: "Validation failed",
+          details: [{ path: "body.bookId", message: "Book not found on your account" }],
+        });
+      }
+      otherBooks = author.books.filter((b) => b.id !== bookId);
+    }
+
+    // Retrieve KB chunks with minScore 0.82 for relevance floor (filters out Company Overview "Delhi" match while keeping valid queries)
+    const kb = await prisma.kbChunk.findMany({ select: { title: true, content: true, category: true } });
+    const chunks = rankChunks(question, kb, { limit: 3, minScore: 0.82 });
+
+    // Refusal if no chunk clears the floor
+    if (chunks.length === 0) {
+      return res.json({ answered: false, ticketSuggestion: true });
+    }
+
+    const result = await answerQuestion(question, author.name || "there", selectedBook, otherBooks, chunks);
+
+    res.json(result);
+  },
+);
+
 // ---------- Admin ----------
 
 const admin = [authenticateJWT, authorizeRoles("ADMIN")];
