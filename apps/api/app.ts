@@ -13,6 +13,8 @@ import { validate } from "./middleware/validate.middleware";
 import { classifyTicket, generateDraft } from "./services/ai/client";
 import { nextPayoutDate, formatDate, isRoyaltyOverdue } from "./services/ai/payout";
 import { summariseSales, topSellersByCopies } from "./services/ai/sales-insights";
+import { retrieveForDraft } from "./services/ai/retrieval";
+import { classifyDraftUse, summariseDraftQuality } from "./services/ai/telemetry";
 import { CATEGORIES, PRIORITIES, STATUSES, PRIORITY_RANK } from "./domain";
 
 if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET is not set");
@@ -425,20 +427,38 @@ app.post("/api/admin/tickets/:id/notes", ...admin, validate(messageSchema), asyn
 
 app.post("/api/admin/tickets/:id/responses", ...admin, validate(messageSchema), async (req, res) => {
   const ticket = await prisma.ticket.findUniqueOrThrow({ where: { id: req.params.id as string } });
+  const body = req.body.body as string;
+  // Measure how the human treated the draft before clearing it for the next turn.
+  const use = ticket.aiDraft ? classifyDraftUse(ticket.aiDraft, body) : null;
+
   const [message] = await prisma.$transaction([
     prisma.ticketMessage.create({
-      data: { ticketId: ticket.id, senderRole: "ADMIN", body: req.body.body },
+      data: { ticketId: ticket.id, senderRole: "ADMIN", body },
     }),
     prisma.ticket.update({
       where: { id: ticket.id },
       data: {
         aiDraft: null, // the draft was for the previous turn
+        ...(use && { aiDraftOutcome: use.outcome, aiDraftSimilarity: use.similarity }),
         ...(ticket.status === "Open" && { status: "In Progress" }),
         ...(!ticket.assignedAdminId && { assignedAdminId: req.user!.id }),
       },
     }),
   ]);
   res.status(201).json(message);
+});
+
+app.get("/api/admin/ai-quality", ...admin, async (_req, res) => {
+  const rows = await prisma.ticket.findMany({
+    select: {
+      category: true,
+      categoryOverride: true,
+      aiDraftSource: true,
+      aiDraftOutcome: true,
+      aiDraftSimilarity: true,
+    },
+  });
+  res.json(summariseDraftQuality(rows));
 });
 
 const draftSchema = idParam.extend({
@@ -457,32 +477,57 @@ app.post("/api/admin/tickets/:id/ai-draft", ...admin, validate(draftSchema), asy
 
   // Cost: drafts are cached per ticket and only regenerated on explicit request.
   if (ticket.aiDraft && res.locals.query.regenerate !== "1") {
-    return res.json({ draft: ticket.aiDraft, source: ticket.aiDraftSource, cached: true });
+    return res.json({
+      draft: ticket.aiDraft,
+      source: ticket.aiDraftSource,
+      sources: ticket.aiDraftSources ?? [],
+      cached: true,
+    });
   }
 
   const category = ticket.categoryOverride || ticket.category;
-  const chunks = await prisma.kbChunk.findMany({
-    where: { category },
-    select: { title: true, content: true },
-  });
-
   const latest = ticket.messages[0]?.body;
+  const followUp = latest && latest !== ticket.description ? latest : null;
+
+  // Retrieval spans the whole KB instead of matching on category alone, so a ticket that an admin
+  // re-categorised still finds the policy that actually answers it. The assigned category is always
+  // kept in the mix, so grounding can't regress to "no policy available".
+  const kb = await prisma.kbChunk.findMany({ select: { title: true, content: true, category: true } });
+  const grounded = retrieveForDraft(
+    [ticket.subject, ticket.description, followUp ?? ""].join("\n"),
+    kb,
+    category,
+    { limit: 3 },
+  );
+  const sources = grounded.map((c) => ({
+    title: c.title,
+    category: c.category ?? null,
+    score: Number(c.score.toFixed(3)),
+  }));
+
   const result = await generateDraft({
     authorName: ticket.author.name || "there",
     subject: ticket.subject,
     description: ticket.description,
-    latestMessage: latest && latest !== ticket.description ? latest : null,
+    latestMessage: followUp,
     category,
     book: ticket.book,
     otherBooks: ticket.book ? [] : ticket.author.books,
-    chunks,
+    chunks: grounded.map(({ title, content }) => ({ title, content })),
   });
 
   await prisma.ticket.update({
     where: { id: ticket.id },
-    data: { aiDraft: result.draft, aiDraftSource: result.source },
+    data: {
+      aiDraft: result.draft,
+      aiDraftSource: result.source,
+      aiDraftSources: sources,
+      // A regenerated draft is a new artefact; the previous outcome belongs to the old one.
+      aiDraftOutcome: null,
+      aiDraftSimilarity: null,
+    },
   });
-  res.json({ ...result, cached: false });
+  res.json({ ...result, sources, cached: false });
 });
 
 app.use("/api", (_req: Request, res: Response) => {

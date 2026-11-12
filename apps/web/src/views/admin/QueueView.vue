@@ -10,6 +10,9 @@ const filters = reactive({
   category: '',
   priority: '',
 })
+const quality = ref(null)
+
+const pct = (n) => `${Math.round((n ?? 0) * 100)}%`
 
 const categories = [
   'Royalty & Payments',
@@ -48,9 +51,20 @@ function age(t) {
   return h < 24 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`
 }
 
+// Draft quality changes only when a reply is sent, so it is fetched once per visit rather than
+// riding the 10s queue poll.
+async function loadQuality() {
+  try {
+    quality.value = await api.aiQuality()
+  } catch (e) {
+    quality.value = null
+  }
+}
+
 let timer
 onMounted(() => {
   load()
+  loadQuality()
   timer = setInterval(() => !document.hidden && load(), 10000)
 })
 onUnmounted(() => clearInterval(timer))
@@ -92,6 +106,85 @@ onUnmounted(() => clearInterval(timer))
         </div>
         <button type="button" @click="load">Apply filters</button>
       </div>
+    </div>
+
+    <div v-if="quality" class="card" style="margin-bottom: 1rem">
+      <div style="display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap">
+        <div>
+          <h3 style="margin: 0">AI draft quality</h3>
+          <p class="muted" style="font-size: 0.85rem; margin: 0.25rem 0 0">
+            How admins treated drafts before sending, across all tickets.
+          </p>
+        </div>
+        <div style="text-align: right">
+          <div style="font-size: 1.6rem; font-weight: 700; line-height: 1">
+            {{ pct(quality.acceptRate) }}
+          </div>
+          <div class="muted" style="font-size: 0.75rem">sent as drafted</div>
+        </div>
+      </div>
+
+      <div
+        v-if="quality.evaluated"
+        style="
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+          gap: 0.75rem;
+          margin-top: 0.85rem;
+        "
+      >
+        <div>
+          <div class="muted" style="font-size: 0.75rem">Evaluated</div>
+          <strong>{{ quality.evaluated }}</strong>
+        </div>
+        <div>
+          <div class="muted" style="font-size: 0.75rem">Accepted verbatim</div>
+          <strong>{{ quality.accepted }}</strong>
+        </div>
+        <div>
+          <div class="muted" style="font-size: 0.75rem">Edited</div>
+          <strong>{{ quality.edited }}</strong>
+        </div>
+        <div>
+          <div class="muted" style="font-size: 0.75rem">Discarded</div>
+          <strong>{{ quality.discarded }}</strong>
+        </div>
+        <div>
+          <div class="muted" style="font-size: 0.75rem">Avg similarity</div>
+          <strong>{{ pct(quality.avgSimilarity) }}</strong>
+        </div>
+        <div>
+          <div class="muted" style="font-size: 0.75rem">Template fallback</div>
+          <strong>{{ pct(quality.fallbackRate) }}</strong>
+          <div class="muted" style="font-size: 0.75rem">
+            {{ quality.fallbacks }}/{{ quality.generated }} drafts
+          </div>
+        </div>
+      </div>
+      <p v-else class="muted" style="font-size: 0.9rem; margin-bottom: 0">
+        No drafts sent yet. Open a ticket, generate a draft and send a reply to start measuring.
+      </p>
+
+      <table v-if="quality.byCategory?.length" class="table" style="margin-top: 0.75rem">
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th>Drafts</th>
+            <th>Accepted</th>
+            <th>Edited</th>
+            <th>Discarded</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="c in quality.byCategory" :key="c.category">
+            <td>{{ c.category }}</td>
+            <td>{{ c.generated }}</td>
+            <td>{{ c.accepted }}</td>
+            <td>{{ c.edited }}</td>
+            <td>{{ c.discarded }}</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
     <div v-if="error" class="error">{{ error }}</div>

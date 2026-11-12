@@ -80,4 +80,5 @@ export const api = {
     }),
   royaltyAnalytics: () => request('/api/authors/me/royalty-analytics'),
   salesInsights: () => request('/api/ai/sales-insights'),
+  aiQuality: () => request('/api/admin/ai-quality'),
 }

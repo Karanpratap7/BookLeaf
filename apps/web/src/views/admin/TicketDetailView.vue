@@ -8,6 +8,7 @@ const ticket = ref(null)
 const error = ref('')
 const draftMsg = ref('')
 const draftSource = ref('')
+const draftSources = ref([])
 const drafting = ref(false)
 const reply = ref('')
 const note = ref('')
@@ -52,11 +53,13 @@ async function generateDraft(regenerate) {
     const data = await api.aiDraft(route.params.id, regenerate)
     reply.value = data.draft || ''
     draftSource.value = data.source
+    draftSources.value = data.sources || []
     draftMsg.value = data.cached
       ? 'Saved draft for this ticket. Edit it before sending, or regenerate.'
       : data.notice
   } catch (e) {
     draftSource.value = ''
+    draftSources.value = []
     draftMsg.value = 'Draft unavailable. Please write the reply manually.'
   } finally {
     drafting.value = false
@@ -100,6 +103,7 @@ async function sendReply() {
   try {
     await api.sendResponse(route.params.id, reply.value.trim())
     reply.value = ''
+    draftSources.value = []
     await load()
   } catch (e) {
     error.value = e.message
@@ -252,6 +256,18 @@ async function addNote() {
           </button>
         </div>
         <p class="muted" style="font-size: 0.9rem">{{ draftMsg }}</p>
+        <p v-if="draftSources.length" class="muted" style="font-size: 0.85rem; margin: 0">
+          Grounded in:
+          <span
+            v-for="s in draftSources"
+            :key="s.title"
+            class="badge"
+            :class="s.category ? 'Medium' : 'Low'"
+            style="margin-left: 0.35rem"
+            :title="`${s.category || 'General'} · relevance ${s.score}`"
+            >{{ s.title }}</span
+          >
+        </p>
         <div class="field">
           <textarea
             v-model="reply"

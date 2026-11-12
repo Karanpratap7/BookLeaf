@@ -54,27 +54,32 @@ model Book {
 }
 
 model Ticket {
-  id               String          @id @default(uuid())
-  authorId         String          @map("author_id")
-  bookId           String?         @map("book_id")
-  subject          String
-  description      String
-  status           String          @default("Open")
-  category         String          @default("General Inquiry")
-  priority         String          @default("Medium")
-  categoryOverride String?         @map("category_override")
-  priorityOverride String?         @map("priority_override")
-  assignedAdminId  String?         @map("assigned_admin_id")
-  aiRationale      String?         @map("ai_rationale")
-  aiDraft          String?         @map("ai_draft")
-  aiDraftSource    String?         @map("ai_draft_source")
-  createdAt        DateTime        @default(now()) @map("created_at")
-  updatedAt        DateTime        @updatedAt @map("updated_at")
-  internalNotes    InternalNote[]
-  messages         TicketMessage[]
-  assignedAdmin    User?           @relation("AdminAssignment", fields: [assignedAdminId], references: [id])
-  author           User            @relation("AuthorTickets", fields: [authorId], references: [id])
-  book             Book?           @relation(fields: [bookId], references: [id])
+  id                String          @id @default(uuid())
+  authorId          String          @map("author_id")
+  bookId            String?         @map("book_id")
+  subject           String
+  description       String
+  status            String          @default("Open")
+  category          String          @default("General Inquiry")
+  priority          String          @default("Medium")
+  categoryOverride  String?         @map("category_override")
+  priorityOverride  String?         @map("priority_override")
+  assignedAdminId   String?         @map("assigned_admin_id")
+  aiRationale       String?         @map("ai_rationale")
+  aiDraft           String?         @map("ai_draft")
+  aiDraftSource     String?         @map("ai_draft_source")
+  // Which KB chunks grounded the cached draft, so citations survive a cache hit.
+  aiDraftSources    Json?           @map("ai_draft_sources")
+  // How the admin treated the draft when replying: accepted | edited | discarded.
+  aiDraftOutcome    String?         @map("ai_draft_outcome")
+  aiDraftSimilarity Float?          @map("ai_draft_similarity")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+  internalNotes     InternalNote[]
+  messages          TicketMessage[]
+  assignedAdmin     User?           @relation("AdminAssignment", fields: [assignedAdminId], references: [id])
+  author            User            @relation("AuthorTickets", fields: [authorId], references: [id])
+  book              Book?           @relation(fields: [bookId], references: [id])
 
   @@index([authorId])
   @@index([status])
