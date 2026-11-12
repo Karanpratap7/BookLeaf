@@ -12,6 +12,7 @@ import { authenticateJWT, authorizeRoles, errorHandler } from "./middleware/auth
 import { validate } from "./middleware/validate.middleware";
 import { classifyTicket, generateDraft } from "./services/ai/client";
 import { nextPayoutDate, formatDate, isRoyaltyOverdue } from "./services/ai/payout";
+import { summariseSales, topSellersByCopies } from "./services/ai/sales-insights";
 import { CATEGORIES, PRIORITIES, STATUSES, PRIORITY_RANK } from "./domain";
 
 if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET is not set");
@@ -284,7 +285,8 @@ app.get("/api/authors/me/royalty-analytics", authenticateJWT, authorizeRoles("AU
   });
 });
 
-// AI Sales Trend Analysis (top 10 books only - limits load)
+// AI Sales Trend Analysis: aggregates cover the author's full catalogue, while the
+// per-book detail is capped at the top 10 by copies sold to keep the model payload small.
 app.get("/api/ai/sales-insights", authenticateJWT, authorizeRoles("AUTHOR"), async (req, res) => {
   const user = await prisma.user.findUnique({
     where: { id: req.user!.id },
@@ -295,49 +297,10 @@ app.get("/api/ai/sales-insights", authenticateJWT, authorizeRoles("AUTHOR"), asy
 
   const now = new Date();
 
-  // Only process top 10 books by copies sold to limit computational load
-  const allBooks = user.books;
-  const sortedBooks = [...allBooks].sort((a, b) => b.totalCopiesSold - a.totalCopiesSold).slice(0, 10);
-  const books = sortedBooks.length > 0 ? sortedBooks : allBooks.slice(0, 10);
+  const insights = summariseSales(user.books);
+  const books = topSellersByCopies(user.books);
 
-  // Aggregate sales by genre (from top 10 books only)
-  const genreStats: Record<string, { copies: number; royalty: number; titles: string[] }> = {};
-  books.forEach((book) => {
-    const genre = book.genre || "Unknown";
-    if (!genreStats[genre]) {
-      genreStats[genre] = { copies: 0, royalty: 0, titles: [] };
-    }
-    genreStats[genre].copies += book.totalCopiesSold ?? 0;
-    genreStats[genre].royalty += book.totalRoyaltyEarned ?? 0;
-    genreStats[genre].titles.push(book.title);
-  });
-
-  // Find best-selling genre and title (from top 10)
-  let bestGenre = "None";
-  let bestGenreCopies = 0;
-  for (const [genre, stats] of Object.entries(genreStats)) {
-    if (stats.copies > bestGenreCopies) {
-      bestGenreCopies = stats.copies;
-      bestGenre = genre;
-    }
-  }
-
-  let bestTitle = "None";
-  let bestTitleCopies = 0;
-  books.forEach((book) => {
-    const copies = book.totalCopiesSold ?? 0;
-    if (copies > bestTitleCopies) {
-      bestTitleCopies = copies;
-      bestTitle = book.title;
-    }
-  });
-
-  // Calculate average royalty per copy from top 10 books
-  const totalCopies = books.reduce((sum, book) => sum + (book.totalCopiesSold ?? 0), 0);
-  const totalRoyalty = books.reduce((sum, book) => sum + (book.totalRoyaltyEarned ?? 0), 0);
-  const avgRoyaltyPerCopy = totalCopies > 0 ? (totalRoyalty / totalCopies).toFixed(2) : "0.00";
-
-  // Format book data for AI analysis (from top 10 only)
+  // Format book data for AI analysis (top 10 only)
   const bookSummaries = books.map((book) => ({
     title: book.title,
     genre: book.genre,
@@ -352,20 +315,13 @@ app.get("/api/ai/sales-insights", authenticateJWT, authorizeRoles("AUTHOR"), asy
 
   res.json({
     userName: user.name,
-    totalBooks: allBooks.length,
-    totalCopiesSold: allBooks.reduce((sum, book) => sum + (book.totalCopiesSold ?? 0), 0),
-    totalRoyaltyEarned: allBooks.reduce((sum, book) => sum + (book.totalRoyaltyEarned ?? 0), 0),
-    avgRoyaltyPerCopy,
-    bestSellingTitle: {
-      title: bestTitle,
-      copies: bestTitleCopies,
-    },
-    bestSellingGenre: {
-      genre: bestGenre,
-      totalCopies: bestGenreCopies,
-      titles: genreStats[bestGenre]?.titles || [],
-    },
-    genreStats,
+    totalBooks: insights.totalBooks,
+    totalCopiesSold: insights.totalCopiesSold,
+    totalRoyaltyEarned: insights.totalRoyaltyEarned,
+    avgRoyaltyPerCopy: insights.avgRoyaltyPerCopy,
+    bestSellingTitle: insights.bestSellingTitle,
+    bestSellingGenre: insights.bestSellingGenre,
+    genreStats: insights.genreStats,
     bookSummaries,
     analysisDate: now.toISOString(),
   });
