@@ -15,7 +15,7 @@ async function submit() {
   loading.value = true
   try {
     const data = await auth.login(email.value.trim(), password.value)
-    router.push(data.role === 'ADMIN' ? '/admin/tickets' : '/author/books')
+    router.push(data.role === 'ADMIN' ? '/admin/tickets' : '/author/dashboard')
   } catch (e) {
     error.value = e.message || 'Login failed'
   } finally {

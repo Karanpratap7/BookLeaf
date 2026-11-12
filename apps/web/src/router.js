@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import LoginView from './views/LoginView.vue'
+import AuthorDashboard from './views/author/DashboardView.vue'
 import AuthorBooks from './views/author/BooksView.vue'
 import AuthorTickets from './views/author/TicketsView.vue'
 import AuthorNewTicket from './views/author/NewTicketView.vue'
@@ -13,6 +14,7 @@ const router = createRouter({
   routes: [
     { path: '/', redirect: '/login' },
     { path: '/login', component: LoginView, meta: { guest: true } },
+    { path: '/author/dashboard', component: AuthorDashboard, meta: { role: 'AUTHOR' } },
     { path: '/author/books', component: AuthorBooks, meta: { role: 'AUTHOR' } },
     { path: '/author/tickets', component: AuthorTickets, meta: { role: 'AUTHOR' } },
     { path: '/author/tickets/new', component: AuthorNewTicket, meta: { role: 'AUTHOR' } },
@@ -26,13 +28,13 @@ router.beforeEach((to) => {
   const auth = useAuthStore()
   if (to.meta.guest) {
     if (auth.isLoggedIn) {
-      return auth.isAdmin ? '/admin/tickets' : '/author/books'
+      return auth.isAdmin ? '/admin/tickets' : '/author/dashboard'
     }
     return true
   }
   if (!auth.isLoggedIn) return '/login'
   if (to.meta.role && auth.role !== to.meta.role) {
-    return auth.isAdmin ? '/admin/tickets' : '/author/books'
+    return auth.isAdmin ? '/admin/tickets' : '/author/dashboard'
   }
   return true
 })

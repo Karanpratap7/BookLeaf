@@ -24,6 +24,7 @@ function logout() {
       </div>
       <nav class="nav">
         <template v-if="auth.isAuthor">
+          <RouterLink to="/author/dashboard">Dashboard</RouterLink>
           <RouterLink to="/author/books">My Books</RouterLink>
           <RouterLink to="/author/tickets">My Tickets</RouterLink>
           <RouterLink to="/author/tickets/new">New Query</RouterLink>
