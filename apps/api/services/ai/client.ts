@@ -87,7 +87,14 @@ export async function classifyTicket(subject: string, description: string): Prom
       ],
       { temperature: 0, maxTokens: 120, timeoutMs: 8000, json: true, tag: "classify" },
     );
-    return classificationSchema.parse(JSON.parse(raw.replace(/```(json)?/g, "")));
+    // Map explicitly: without the project tsconfig (as on Vercel) zod's inferred output
+    // degrades to optional properties, so passing it straight through fails typecheck.
+    const parsed = classificationSchema.parse(JSON.parse(raw.replace(/```(json)?/g, "")));
+    return {
+      category: parsed.category,
+      priority: parsed.priority,
+      rationale: parsed.rationale,
+    };
   } catch (err: any) {
     console.warn("[ai] classify failed, using keyword fallback:", err?.message || err);
     return classifyLocally(subject, description);

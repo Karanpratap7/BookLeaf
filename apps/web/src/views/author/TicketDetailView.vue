@@ -42,9 +42,9 @@ async function sendReply() {
 // Timeline computed properties
 const timeline = computed(() => {
   if (!ticket.value) return []
-  
+
   const events = []
-  
+
   // Ticket creation event
   events.push({
     id: 'creation',
@@ -52,11 +52,11 @@ const timeline = computed(() => {
     time: new Date(ticket.value.createdAt),
     description: 'Your ticket was submitted',
     type: 'creation',
-    status: 'default'
+    status: 'default',
   })
-  
+
   // Add admin messages to timeline
-  const adminMessages = ticket.value.messages.filter(m => m.senderRole === 'ADMIN')
+  const adminMessages = ticket.value.messages.filter((m) => m.senderRole === 'ADMIN')
   if (adminMessages.length > 0) {
     adminMessages.forEach((msg, index) => {
       events.push({
@@ -65,13 +65,13 @@ const timeline = computed(() => {
         time: new Date(msg.createdAt),
         description: `BookLeaf Support: ${msg.body.slice(0, 80)}${msg.body.length > 80 ? '...' : ''}`,
         type: 'admin',
-        status: 'default'
+        status: 'default',
       })
     })
   }
-  
+
   // Add author messages to timeline
-  const authorMessages = ticket.value.messages.filter(m => m.senderRole === 'AUTHOR')
+  const authorMessages = ticket.value.messages.filter((m) => m.senderRole === 'AUTHOR')
   if (authorMessages.length > 0) {
     authorMessages.forEach((msg, index) => {
       events.push({
@@ -80,14 +80,14 @@ const timeline = computed(() => {
         time: new Date(msg.createdAt),
         description: `You: ${msg.body.slice(0, 80)}${msg.body.length > 80 ? '...' : ''}`,
         type: 'author',
-        status: 'default'
+        status: 'default',
       })
     })
   }
-  
+
   // Sort by time
   events.sort((a, b) => a.time.getTime() - b.time.getTime())
-  
+
   return events
 })
 
@@ -96,14 +96,14 @@ onMounted(() => {
   timer = setInterval(() => !document.hidden && load(), 4000)
 })
 onUnmounted(() => clearInterval(timer))
-
+</script>
 
 <template>
   <div style="max-width: 760px">
     <RouterLink to="/author/tickets" class="muted">← Back to tickets</RouterLink>
-    <div v-if="error" class="error" style="margin-top: 1rem">{{ error }}</div>
-    <div v-else-if="!ticket" class="empty">Loading…</div>
-    <template v-else>
+    <p v-if="error" class="error" style="margin-top: 1rem">{{ error }}</p>
+    <p v-else-if="!ticket" class="empty">Loading…</p>
+    <div v-else class="ticket-detail">
       <div
         style="
           display: flex;
@@ -124,9 +124,21 @@ onUnmounted(() => clearInterval(timer))
           ticket.status
         }}</span>
       </div>
-            <!-- Timeline Section -->
-      <div v-if="ticket.messages.length > 0" class="card" style="margin-top: 1rem; margin-bottom: 1rem">
-        <div style="padding: 0.75rem 1rem; background: var(--background); border-radius: 8px; margin-bottom: 0.75rem">
+
+      <!-- Timeline Section -->
+      <div
+        v-if="ticket.messages.length > 0"
+        class="card"
+        style="margin-top: 1rem; margin-bottom: 1rem"
+      >
+        <div
+          style="
+            padding: 0.75rem 1rem;
+            background: var(--background);
+            border-radius: 8px;
+            margin-bottom: 0.75rem;
+          "
+        >
           <strong style="font-size: 0.85rem">Ticket Journey</strong>
           <span style="float: right; font-size: 0.75rem; color: var(--muted)">
             {{ timeline.length }} milestone{{ timeline.length !== 1 ? 's' : '' }}
@@ -134,37 +146,48 @@ onUnmounted(() => clearInterval(timer))
         </div>
         <div style="display: flex; flex-direction: column; gap: 0.5rem; min-height: 120px">
           <template v-for="event in timeline" :key="event.id">
-            <div style="
-              display: flex;
-              align-items: flex-start;
-              padding: 0.5rem 0.75rem;
-              border-left: 3px solid var(--primary);
-              background: var(--surface);
-              border-radius: 4px 0 0 4px;
-              min-width: 200px;
-            ">
-              <span style="
-                width: 8px;
-                height: 8px;
-                background: var(--primary);
-                border-radius: 50%;
-                margin-right: 0.5rem;
-                flex-shrink: 0;
-                margin-top: 0.1rem;
-              "></span>
+            <div
+              style="
+                display: flex;
+                align-items: flex-start;
+                padding: 0.5rem 0.75rem;
+                border-left: 3px solid var(--primary);
+                background: var(--surface);
+                border-radius: 4px 0 0 4px;
+                min-width: 200px;
+              "
+            >
+              <span
+                style="
+                  width: 8px;
+                  height: 8px;
+                  background: var(--primary);
+                  border-radius: 50%;
+                  margin-right: 0.5rem;
+                  flex-shrink: 0;
+                  margin-top: 0.1rem;
+                "
+              ></span>
               <div style="flex: 1">
-                <strong style="font-size: 0.8rem; color: var(--text-primary)">{{ event.title }}</strong>
+                <strong style="font-size: 0.8rem; color: var(--text-primary)">{{
+                  event.title
+                }}</strong>
                 <span class="muted" style="font-size: 0.7rem; color: var(--muted)">
                   {{ new Date(event.time).toLocaleString() }}
                 </span>
-                <p v-if="event.description" style="font-size: 0.75rem; margin: 0.2rem 0 0; color: var(--muted)">{{ event.description }}</p>
+                <p
+                  v-if="event.description"
+                  style="font-size: 0.75rem; margin: 0.2rem 0 0; color: var(--muted)"
+                >
+                  {{ event.description }}
+                </p>
               </div>
             </div>
           </template>
         </div>
       </div>
 
-<div class="card" style="margin-top: 1rem">
+      <div class="card" style="margin-top: 1rem">
         <h3 style="margin-top: 0">Conversation</h3>
         <div
           v-for="m in ticket.messages"
@@ -173,9 +196,9 @@ onUnmounted(() => clearInterval(timer))
         >
           <div style="display: flex; justify-content: space-between; gap: 1rem">
             <strong>{{ m.senderRole === 'ADMIN' ? 'BookLeaf Support' : 'You' }}</strong>
-            <span class="muted" style="font-size: 0.8rem">{{
-              new Date(m.createdAt).toLocaleString()
-            }}</span>
+            <span class="muted" style="font-size: 0.8rem">
+              {{ new Date(m.createdAt).toLocaleString() }}
+            </span>
           </div>
           <p style="margin: 0.4rem 0 0; white-space: pre-wrap">{{ m.body }}</p>
         </div>
@@ -197,6 +220,6 @@ onUnmounted(() => clearInterval(timer))
       <p v-else class="muted" style="margin-top: 1rem">
         This ticket is closed. Open a new query if you need more help.
       </p>
-    </template>
+    </div>
   </div>
 </template>

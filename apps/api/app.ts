@@ -13,7 +13,6 @@ import { validate } from "./middleware/validate.middleware";
 import { classifyTicket, generateDraft } from "./services/ai/client";
 import { nextPayoutDate, formatDate, isRoyaltyOverdue } from "./services/ai/payout";
 import { CATEGORIES, PRIORITIES, STATUSES, PRIORITY_RANK } from "./domain";
-import { nextPayoutDate, formatDate, isRoyaltyOverdue } from "./services/ai/payout";
 
 if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET is not set");
 
@@ -192,200 +191,185 @@ app.post(
       }),
     ]);
     res.status(201).json(message);
-
-
-app.get(
-  "/api/authors/me/royalty-analytics",
-  authenticateJWT,
-  authorizeRoles("AUTHOR"),
-  async (req, res) => {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user!.id },
-      include: { books: true },
-    });
-
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    const now = new Date();
-
-    const booksAnalytics = user.books.map((book) => {
-      const royaltyPending = book.royaltyPending ?? 0;
-      const isOverdue = isRoyaltyOverdue(
-        {
-          royaltyPending,
-          lastRoyaltyPayoutDate: book.lastRoyaltyPayoutDate,
-          publicationDate: book.publicationDate,
-        },
-        now,
-      );
-
-      const platforms =
-        Array.isArray(book.availableOn) && book.availableOn.length
-          ? book.availableOn.join(", ")
-          : "none yet";
-
-      // Calculate earnings per copy (simple: totalRoyaltyEarned / totalCopiesSold if copies > 0)
-      const earningsPerCopy = book.totalCopiesSold > 0
-        ? (book.totalRoyaltyEarned ?? 0) / book.totalCopiesSold
-        : 0;
-
-      return {
-        id: book.id,
-        title: book.title,
-        genre: book.genre,
-        mrp: book.mrp,
-        totalCopiesSold: book.totalCopiesSold,
-        totalRoyaltyEarned: book.totalRoyaltyEarned,
-        royaltyPaid: book.royaltyPaid,
-        royaltyPending: book.royaltyPending,
-        isRoyaltyOverdue: isOverdue,
-        lastRoyaltyPayoutDate: book.lastRoyaltyPayoutDate,
-        formattedLastPayout: formatDate(book.lastRoyaltyPayoutDate),
-        platforms,
-        earningsPerCopy: earningsPerCopy.toFixed(2),
-        monthsSincePublish: book.publicationDate
-          ? Math.floor((now.getTime() - new Date(book.publicationDate).getTime()) / (30 * 24 * 60 * 60 * 1000))
-          : null,
-      };
-    });
-
-    // Aggregate insights
-    const totalBooks = booksAnalytics.length;
-    const totalCopiesSold = booksAnalytics.reduce((sum, b) => sum + b.totalCopiesSold, 0);
-    const totalRoyaltyEarned = booksAnalytics.reduce((sum, b) => sum + (b.totalRoyaltyEarned ?? 0), 0);
-    const totalRoyaltyPending = booksAnalytics.reduce((sum, b) => sum + b.royaltyPending, 0);
-    const overdueBooks = booksAnalytics.filter((b) => b.isRoyaltyOverdue).length;
-
-    // "When will I hit ₹1,000?" calculation
-    let thresholdTimeframe = "not applicable";
-    if (totalRoyaltyPending > 1000 && overdueBooks > 0) {
-      thresholdTimeframe = "likely overdue - payments team will verify within 48 hours";
-    } else if (totalRoyaltyPending > 0) {
-      const quarterlyRate = totalRoyaltyEarned / Math.max(1, totalBooks * 2);
-      const quartersToThreshold = Math.ceil((1000 - totalRoyaltyPending) / quarterlyRate);
-      const monthsToThreshold = quartersToThreshold * 3;
-      thresholdTimeframe = `${monthsToThreshold} months at current rate`;
-    } else {
-      thresholdTimeframe = "on track - no pending royalties above threshold";
-    }
-
-    const categoryBreakdown = {};
-    booksAnalytics.forEach((b) => {
-      const genre = b.genre || "Unknown";
-      if (!categoryBreakdown[genre]) categoryBreakdown[genre] = { copies: 0, royalty: 0 };
-      categoryBreakdown[genre].copies += b.totalCopiesSold;
-      categoryBreakdown[genre].royalty += b.totalRoyaltyEarned ?? 0;
-    });
-
-    res.json({
-      userName: user.name,
-      totalBooks,
-      totalCopiesSold,
-      totalRoyaltyEarned,
-      totalRoyaltyPending,
-      overdueBooks,
-      thresholdTimeframe,
-      books: booksAnalytics,
-      categoryBreakdown,
-      nextPayoutDate: formatDate(nextPayoutDate()),
-    });
   },
+);
 
+app.get("/api/authors/me/royalty-analytics", authenticateJWT, authorizeRoles("AUTHOR"), async (req, res) => {
+  const user = await prisma.user.findUnique({
+    where: { id: req.user!.id },
+    include: { books: true },
+  });
 
+  if (!user) return res.status(404).json({ error: "User not found" });
 
-// AI Sales Trend Analysis (top 10 books only - limits load)
-app.get(
-  "/api/ai/sales-insights",
-  authenticateJWT,
-  authorizeRoles("AUTHOR"),
-  async (req, res) => {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user!.id },
-      include: { books: true },
-    });
+  const now = new Date();
 
-    if (!user) return res.status(404).json({ error: "User not found" });
+  const booksAnalytics = user.books.map((book) => {
+    const royaltyPending = book.royaltyPending ?? 0;
+    const isOverdue = isRoyaltyOverdue(
+      {
+        royaltyPending,
+        lastRoyaltyPayoutDate: book.lastRoyaltyPayoutDate,
+        publicationDate: book.publicationDate,
+      },
+      now,
+    );
 
-    const now = new Date();
+    const platforms =
+      Array.isArray(book.availableOn) && book.availableOn.length ? book.availableOn.join(", ") : "none yet";
 
-    // Only process top 10 books by copies sold to limit computational load
-    const allBooks = user.books;
-    const sortedBooks = allBooks
-      .filter((book): book is { totalCopiesSold: number } => book.totalCopiesSold !== undefined)
-      .sort((a, b) => (b.totalCopiesSold ?? 0) - (a.totalCopiesSold ?? 0))
-      .slice(0, 10);
-    const books = sortedBooks.length > 0 ? sortedBooks : allBooks.slice(0, 10);
+    // Calculate earnings per copy (simple: totalRoyaltyEarned / totalCopiesSold if copies > 0)
+    const earningsPerCopy =
+      book.totalCopiesSold > 0 ? (book.totalRoyaltyEarned ?? 0) / book.totalCopiesSold : 0;
 
-    // Aggregate sales by genre (from top 10 books only)
-    const genreStats = {};
-    books.forEach(book => {
-      const genre = book.genre || "Unknown";
-      if (!genreStats[genre]) {
-        genreStats[genre] = { copies: 0, royalty: 0, titles: [] };
-      }
-      genreStats[genre].copies += book.totalCopiesSold ?? 0;
-      genreStats[genre].royalty += book.totalRoyaltyEarned ?? 0;
-      genreStats[genre].titles.push(book.title);
-    });
-
-    // Find best-selling genre and title (from top 10)
-    let bestGenre = "None";
-    let bestGenreCopies = 0;
-    for (const [genre, stats] of Object.entries(genreStats)) {
-      if (stats.copies > bestGenreCopies) {
-        bestGenreCopies = stats.copies;
-        bestGenre = genre;
-      }
-    }
-
-    let bestTitle = "None";
-    let bestTitleCopies = 0;
-    books.forEach(book => {
-      const copies = book.totalCopiesSold ?? 0;
-      if (copies > bestTitleCopies) {
-        bestTitleCopies = copies;
-        bestTitle = book.title;
-      }
-    });
-
-    // Calculate average royalty per copy from top 10 books
-    const totalCopies = books.reduce((sum, book) => sum + (book.totalCopiesSold ?? 0), 0);
-    const totalRoyalty = books.reduce((sum, book) => sum + (book.totalRoyaltyEarned ?? 0), 0);
-    const avgRoyaltyPerCopy = totalCopies > 0 ? (totalRoyalty / totalCopies).toFixed(2) : "0.00";
-
-    // Format book data for AI analysis (from top 10 only)
-    const bookSummaries = books.map(book => ({
+    return {
+      id: book.id,
       title: book.title,
       genre: book.genre,
-      copiesSold: book.totalCopiesSold ?? 0,
-      totalRoyaltyEarned: book.totalRoyaltyEarned ?? 0,
       mrp: book.mrp,
-      status: book.status,
+      totalCopiesSold: book.totalCopiesSold,
+      totalRoyaltyEarned: book.totalRoyaltyEarned,
+      royaltyPaid: book.royaltyPaid,
+      royaltyPending: book.royaltyPending,
+      isRoyaltyOverdue: isOverdue,
+      lastRoyaltyPayoutDate: book.lastRoyaltyPayoutDate,
+      formattedLastPayout: formatDate(book.lastRoyaltyPayoutDate),
+      platforms,
+      earningsPerCopy: earningsPerCopy.toFixed(2),
       monthsSincePublish: book.publicationDate
         ? Math.floor((now.getTime() - new Date(book.publicationDate).getTime()) / (30 * 24 * 60 * 60 * 1000))
         : null,
-    }));
+    };
+  });
 
-    res.json({
-      userName: user.name,
-      totalBooks: allBooks.length,
-      totalCopiesSold: allBooks.reduce((sum, book) => sum + (book.totalCopiesSold ?? 0), 0),
-      totalRoyaltyEarned: allBooks.reduce((sum, book) => sum + (book.totalRoyaltyEarned ?? 0), 0),
-      avgRoyaltyPerCopy,
-      bestSellingTitle: {
-        title: bestTitle,
-        copies: bestTitleCopies,
-      },
-      bestSellingGenre: {
-        genre: bestGenre,
-        totalCopies: bestGenreCopies,
-        titles: genreStats[bestGenre]?.titles || [],
-      },
-      genreStats,
-      bookSummaries,
-      analysisDate: now.toISOString(),
-    });
-  },
+  // Aggregate insights
+  const totalBooks = booksAnalytics.length;
+  const totalCopiesSold = booksAnalytics.reduce((sum, b) => sum + b.totalCopiesSold, 0);
+  const totalRoyaltyEarned = booksAnalytics.reduce((sum, b) => sum + (b.totalRoyaltyEarned ?? 0), 0);
+  const totalRoyaltyPending = booksAnalytics.reduce((sum, b) => sum + b.royaltyPending, 0);
+  const overdueBooks = booksAnalytics.filter((b) => b.isRoyaltyOverdue).length;
+
+  // "When will I hit ₹1,000?" calculation
+  let thresholdTimeframe = "not applicable";
+  if (totalRoyaltyPending > 1000 && overdueBooks > 0) {
+    thresholdTimeframe = "likely overdue - payments team will verify within 48 hours";
+  } else if (totalRoyaltyPending > 0) {
+    const quarterlyRate = totalRoyaltyEarned / Math.max(1, totalBooks * 2);
+    const quartersToThreshold = Math.ceil((1000 - totalRoyaltyPending) / quarterlyRate);
+    const monthsToThreshold = quartersToThreshold * 3;
+    thresholdTimeframe = `${monthsToThreshold} months at current rate`;
+  } else {
+    thresholdTimeframe = "on track - no pending royalties above threshold";
+  }
+
+  const categoryBreakdown: Record<string, { copies: number; royalty: number }> = {};
+  booksAnalytics.forEach((b) => {
+    const genre = b.genre || "Unknown";
+    if (!categoryBreakdown[genre]) categoryBreakdown[genre] = { copies: 0, royalty: 0 };
+    categoryBreakdown[genre].copies += b.totalCopiesSold;
+    categoryBreakdown[genre].royalty += b.totalRoyaltyEarned ?? 0;
+  });
+
+  res.json({
+    userName: user.name,
+    totalBooks,
+    totalCopiesSold,
+    totalRoyaltyEarned,
+    totalRoyaltyPending,
+    overdueBooks,
+    thresholdTimeframe,
+    books: booksAnalytics,
+    categoryBreakdown,
+    nextPayoutDate: formatDate(nextPayoutDate()),
+  });
+});
+
+// AI Sales Trend Analysis (top 10 books only - limits load)
+app.get("/api/ai/sales-insights", authenticateJWT, authorizeRoles("AUTHOR"), async (req, res) => {
+  const user = await prisma.user.findUnique({
+    where: { id: req.user!.id },
+    include: { books: true },
+  });
+
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  const now = new Date();
+
+  // Only process top 10 books by copies sold to limit computational load
+  const allBooks = user.books;
+  const sortedBooks = [...allBooks].sort((a, b) => b.totalCopiesSold - a.totalCopiesSold).slice(0, 10);
+  const books = sortedBooks.length > 0 ? sortedBooks : allBooks.slice(0, 10);
+
+  // Aggregate sales by genre (from top 10 books only)
+  const genreStats: Record<string, { copies: number; royalty: number; titles: string[] }> = {};
+  books.forEach((book) => {
+    const genre = book.genre || "Unknown";
+    if (!genreStats[genre]) {
+      genreStats[genre] = { copies: 0, royalty: 0, titles: [] };
+    }
+    genreStats[genre].copies += book.totalCopiesSold ?? 0;
+    genreStats[genre].royalty += book.totalRoyaltyEarned ?? 0;
+    genreStats[genre].titles.push(book.title);
+  });
+
+  // Find best-selling genre and title (from top 10)
+  let bestGenre = "None";
+  let bestGenreCopies = 0;
+  for (const [genre, stats] of Object.entries(genreStats)) {
+    if (stats.copies > bestGenreCopies) {
+      bestGenreCopies = stats.copies;
+      bestGenre = genre;
+    }
+  }
+
+  let bestTitle = "None";
+  let bestTitleCopies = 0;
+  books.forEach((book) => {
+    const copies = book.totalCopiesSold ?? 0;
+    if (copies > bestTitleCopies) {
+      bestTitleCopies = copies;
+      bestTitle = book.title;
+    }
+  });
+
+  // Calculate average royalty per copy from top 10 books
+  const totalCopies = books.reduce((sum, book) => sum + (book.totalCopiesSold ?? 0), 0);
+  const totalRoyalty = books.reduce((sum, book) => sum + (book.totalRoyaltyEarned ?? 0), 0);
+  const avgRoyaltyPerCopy = totalCopies > 0 ? (totalRoyalty / totalCopies).toFixed(2) : "0.00";
+
+  // Format book data for AI analysis (from top 10 only)
+  const bookSummaries = books.map((book) => ({
+    title: book.title,
+    genre: book.genre,
+    copiesSold: book.totalCopiesSold ?? 0,
+    totalRoyaltyEarned: book.totalRoyaltyEarned ?? 0,
+    mrp: book.mrp,
+    status: book.status,
+    monthsSincePublish: book.publicationDate
+      ? Math.floor((now.getTime() - new Date(book.publicationDate).getTime()) / (30 * 24 * 60 * 60 * 1000))
+      : null,
+  }));
+
+  res.json({
+    userName: user.name,
+    totalBooks: allBooks.length,
+    totalCopiesSold: allBooks.reduce((sum, book) => sum + (book.totalCopiesSold ?? 0), 0),
+    totalRoyaltyEarned: allBooks.reduce((sum, book) => sum + (book.totalRoyaltyEarned ?? 0), 0),
+    avgRoyaltyPerCopy,
+    bestSellingTitle: {
+      title: bestTitle,
+      copies: bestTitleCopies,
+    },
+    bestSellingGenre: {
+      genre: bestGenre,
+      totalCopies: bestGenreCopies,
+      titles: genreStats[bestGenre]?.titles || [],
+    },
+    genreStats,
+    bookSummaries,
+    analysisDate: now.toISOString(),
+  });
+});
 // ---------- Admin ----------
 
 const admin = [authenticateJWT, authorizeRoles("ADMIN")];
