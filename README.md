@@ -67,10 +67,11 @@ Vue 3 SPA (apps/web) ──fetch /api/*──▶ Express app (apps/api/app.ts) �
 
 ## AI integration
 
-| Feature  | When                                                      | Input sent                                                  | Output                                        |
-| -------- | --------------------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------- |
-| Classify | On ticket creation (awaited, 8s cap)                      | Subject + description only (~360 prompt tokens)              | `{category, priority, rationale}`, zod-validated |
-| Draft    | When an admin opens a ticket (20s cap); cached per ticket | Tone rules + **only this category's** KB chunks + account facts + query (~500 tokens) | Plain-text reply for the admin to edit |
+| Feature       | When                                                      | Input sent                                                  | Output                                        |
+| ------------- | --------------------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------- |
+| Classify      | On ticket creation (awaited, 8s cap)                      | Subject + description only (~360 prompt tokens)              | `{category, priority, rationale}`, zod-validated |
+| Draft         | When an admin opens a ticket (20s cap); cached per ticket | Tone rules + **only this category's** KB chunks + account facts + query (~500 tokens) | Plain-text reply for the admin to edit |
+| Grounded Answer (Ask First) | On author's "Ask First" click (15s cap); no cache | Tone rules + top-3 KB chunks (minScore 0.82) + account facts + question (~500 tokens) | `{ answered: true, answer, sources[], model }` or `{ answered: false, ticketSuggestion: true }` |
 
 **Prompt strategy**
 
@@ -99,6 +100,19 @@ Every call goes through one `chat()` helper with a hard `AbortSignal.timeout`.
 
 **Model choice:** `gpt-4o-mini` via OpenRouter. It's cheap, fast (under 3s) and reliable at JSON mode, and the quality is more than enough for short, policy-grounded replies. Going through OpenRouter means switching to Claude Haiku or another model only takes changing `OPENROUTER_MODEL`.
 
+**Grounded Answer ("Ask First")**
+
+- The author fills in the Subject and Description on the "Submit a Support Query" page, then clicks **Ask First** before filing a ticket.
+- The endpoint retrieves the top-3 KB chunks via `rankChunks` with a **relevance floor of 0.82** (this filters out the Company Overview section which mentions "Delhi" and would otherwise match weather queries).
+- If no chunk clears the floor → `{ answered: false, ticketSuggestion: true }`. The UI shows a gentle notice with a pre-filled "Raise a ticket" button.
+- If chunks clear the floor → the pinned model is called with a **grounded-only prompt** (temperature 0.2, 350 max tokens):
+  - `POLICY CONTEXT`: the top-3 chunks
+  - `ACCOUNT FACTS`: computed in code (royalty earned/paid/pending, last payout, next payout date, overdue flag, book details)
+  - `QUESTION`: the author's question
+- Response includes `answer`, `sources` (title, category, score), and `model`.
+- **Deterministic fallback** (`policy-fallback` source) if the LLM fails or returns invalid JSON: uses the best-matching chunk's content as the basis.
+- No caching — every click is a fresh call. Token usage logged per call.
+
 ## API
 
 All responses are JSON. Errors use the shape `{ "error": string, "details"?: [{ path, message }] }`:
@@ -126,6 +140,7 @@ Authenticated routes need `Authorization: Bearer <token>`.
 | POST   | `/api/admin/tickets/:id/notes`     | ADMIN  | `{ body }`                                                                   | Internal note, never shown to the author |
 | POST   | `/api/admin/tickets/:id/responses` | ADMIN  | `{ body }`                                                                   | Reply to the author; Open → In Progress; auto-assigns |
 | POST   | `/api/admin/tickets/:id/ai-draft`  | ADMIN  | `?regenerate=1` to bypass the cache                                           | `{ draft, source: "llm" \| "policy", notice, cached }` |
+| POST   | `/api/ai/answer`                   | AUTHOR | `{ question (5–2000), bookId? }`                                              | Grounded answer with KB source chips; refusal if no chunk clears 0.82 floor |
 
 ## Known limitations / next steps
 
